@@ -49,6 +49,7 @@ struct DashboardView: View {
             }
             .padding(24)
         }
+        .background(ReadyRoomPalette.windowBackground.ignoresSafeArea())
     }
 
     private var header: some View {
@@ -78,9 +79,14 @@ struct DashboardView: View {
             if let summary = model.dashboardSummaryByMode[model.preferredMode] ?? model.dashboardSummaryByMode[.templated] {
                 Text(summary.text)
                     .font(.body)
+                    .foregroundStyle(ReadyRoomPalette.primaryText)
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(red: 0.95, green: 0.97, blue: 0.99), in: RoundedRectangle(cornerRadius: 16))
+                    .background(ReadyRoomPalette.bannerSurface, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+                    }
             }
 
             HStack(spacing: 18) {
@@ -107,7 +113,11 @@ struct DashboardView: View {
                     }
                 }
                 .padding()
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .background(ReadyRoomPalette.groupSurface, in: RoundedRectangle(cornerRadius: 16))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+                }
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -122,7 +132,11 @@ struct DashboardView: View {
                         }
                     }
                     .padding()
-                    .background(Color.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 16))
+                    .background(ReadyRoomPalette.groupSurface, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+                    }
                 }
             }
         }
@@ -204,9 +218,10 @@ private struct TimelineItemView: View {
                 if item.changeState != .unchanged {
                     Text(item.changeState.rawValue.capitalized)
                         .font(.caption.weight(.semibold))
+                        .foregroundStyle(ReadyRoomPalette.badgeText)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.orange.opacity(0.2), in: Capsule())
+                        .background(ReadyRoomPalette.badgeFill, in: Capsule())
                 }
             }
             Text(item.metadata["calendarTitle"] ?? item.source.displayName)
@@ -221,7 +236,11 @@ private struct TimelineItemView: View {
             }
         }
         .padding()
-        .background(Color(red: 0.97, green: 0.98, blue: 0.995), in: RoundedRectangle(cornerRadius: 14))
+        .background(ReadyRoomPalette.itemSurface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+        }
         .onHover { hovering = $0 }
     }
 }
@@ -246,8 +265,24 @@ private struct SideCard<Content: View>: View {
             content
         }
         .padding()
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(ReadyRoomPalette.panelSurface, in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+        }
     }
+}
+
+private enum ReadyRoomPalette {
+    static let windowBackground = Color(nsColor: .windowBackgroundColor)
+    static let panelSurface = Color(nsColor: .controlBackgroundColor)
+    static let groupSurface = Color(nsColor: .underPageBackgroundColor)
+    static let itemSurface = Color(nsColor: .textBackgroundColor)
+    static let bannerSurface = Color(nsColor: .controlBackgroundColor)
+    static let cardBorder = Color(nsColor: .separatorColor).opacity(0.35)
+    static let primaryText = Color(nsColor: .labelColor)
+    static let badgeFill = Color(nsColor: .controlAccentColor).opacity(0.16)
+    static let badgeText = Color(nsColor: .labelColor)
 }
 
 struct DashboardWindowBridge: NSViewRepresentable {
@@ -274,4 +309,3 @@ struct DashboardWindowBridge: NSViewRepresentable {
         window.isMovableByWindowBackground = enabled
     }
 }
-

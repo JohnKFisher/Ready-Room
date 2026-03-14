@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RootContentView: View {
@@ -12,6 +13,8 @@ struct RootContentView: View {
             .frame(minWidth: 200)
         } detail: {
             ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                    .ignoresSafeArea()
                 switch model.selectedScreen {
                 case .dashboard:
                     DashboardView(model: model)
