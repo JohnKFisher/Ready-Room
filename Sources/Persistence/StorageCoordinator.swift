@@ -8,28 +8,47 @@ public enum StorageScope: String, Codable, Sendable {
 
 public enum SharedStorageMode: String, Sendable {
     case iCloudDrive = "iCloud Drive"
+    case customFolder = "Custom Folder"
     case localFallback = "Local Fallback"
+}
+
+public struct StoragePreferences: Codable, Sendable, Hashable {
+    public var customSharedRootPath: String?
+
+    public init(customSharedRootPath: String? = nil) {
+        self.customSharedRootPath = customSharedRootPath
+    }
+
+    public var customSharedRoot: URL? {
+        guard let customSharedRootPath, !customSharedRootPath.isEmpty else {
+            return nil
+        }
+        return URL(filePath: customSharedRootPath, directoryHint: .isDirectory)
+    }
 }
 
 public struct StorageRoots: Sendable {
     public var localRoot: URL
     public var sharedRoot: URL?
+    public var sharedMode: SharedStorageMode
 
-    public init(localRoot: URL, sharedRoot: URL?) {
+    public init(localRoot: URL, sharedRoot: URL?, sharedMode: SharedStorageMode) {
         self.localRoot = localRoot
         self.sharedRoot = sharedRoot
+        self.sharedMode = sharedMode
     }
 
     public var effectiveSharedRoot: URL {
-        sharedRoot ?? localRoot.appendingPathComponent("SharedFallback", isDirectory: true)
-    }
-
-    public var sharedMode: SharedStorageMode {
-        sharedRoot == nil ? .localFallback : .iCloudDrive
+        switch sharedMode {
+        case .localFallback:
+            localRoot.appendingPathComponent("SharedFallback", isDirectory: true)
+        case .iCloudDrive, .customFolder:
+            sharedRoot ?? localRoot.appendingPathComponent("SharedFallback", isDirectory: true)
+        }
     }
 
     public var syncsAcrossMacs: Bool {
-        sharedRoot != nil
+        sharedMode != .localFallback
     }
 }
 
@@ -67,16 +86,22 @@ public struct StorageStatus: Sendable {
     }
 
     public var summary: String {
-        if roots.syncsAcrossMacs {
+        switch roots.sharedMode {
+        case .iCloudDrive:
             return "Shared files are using iCloud Drive and should sync across Macs signed into the same iCloud account."
+        case .customFolder:
+            return "Shared files are using a custom shared folder selected on this Mac."
+        case .localFallback:
+            return "Shared files are currently stored in a local fallback folder on this Mac, so they are not syncing across computers yet."
         }
-        return "Shared files are currently stored in a local fallback folder on this Mac, so they are not syncing across computers yet."
     }
 
     public var detail: String {
         switch roots.sharedMode {
         case .iCloudDrive:
             "Shared app data is stored in Ready Room's iCloud Drive documents folder."
+        case .customFolder:
+            "The custom shared-folder path is stored locally on this Mac, so each Mac can point to a different absolute Resilio Sync path. If both Macs point to synced copies of the same folder, Ready Room's shared files will sync without iCloud."
         case .localFallback:
             "iCloud Drive is not active for Ready Room on this Mac right now. That usually means this build is not signed with iCloud entitlements yet, or iCloud Drive is unavailable for the current macOS account."
         }
@@ -89,6 +114,7 @@ public actor ReadyRoomStorageCoordinator {
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let storagePreferencesPath = "Local/storage-preferences.json"
 
     public init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -100,6 +126,50 @@ public actor ReadyRoomStorageCoordinator {
     }
 
     public func resolveRoots() throws -> StorageRoots {
+        let localRoot = try resolveLocalRoot()
+        let preferences = try loadStoragePreferences()
+
+        if let customSharedRoot = preferences.customSharedRoot?.standardizedFileURL {
+            try? fileManager.createDirectory(at: customSharedRoot, withIntermediateDirectories: true)
+            return StorageRoots(localRoot: localRoot, sharedRoot: customSharedRoot, sharedMode: .customFolder)
+        }
+
+        let iCloudSharedRoot = fileManager
+            .url(forUbiquityContainerIdentifier: nil)?
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("ReadyRoom", isDirectory: true)
+
+        if let iCloudSharedRoot {
+            try? fileManager.createDirectory(at: iCloudSharedRoot, withIntermediateDirectories: true)
+            return StorageRoots(localRoot: localRoot, sharedRoot: iCloudSharedRoot, sharedMode: .iCloudDrive)
+        }
+
+        return StorageRoots(localRoot: localRoot, sharedRoot: nil, sharedMode: .localFallback)
+    }
+
+    public func loadStoragePreferences() throws -> StoragePreferences {
+        let url = try resolveLocalRoot().appendingPathComponent(storagePreferencesPath)
+        guard fileManager.fileExists(atPath: url.path) else {
+            return StoragePreferences()
+        }
+        let data = try Data(contentsOf: url)
+        return try decoder.decode(StoragePreferences.self, from: data)
+    }
+
+    public func setCustomSharedRoot(_ url: URL?) throws {
+        var preferences = try loadStoragePreferences()
+        preferences.customSharedRootPath = url?.standardizedFileURL.path
+        try saveStoragePreferences(preferences)
+    }
+
+    private func saveStoragePreferences(_ preferences: StoragePreferences) throws {
+        let url = try resolveLocalRoot().appendingPathComponent(storagePreferencesPath)
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try encoder.encode(preferences)
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func resolveLocalRoot() throws -> URL {
         let localBase = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -108,17 +178,7 @@ public actor ReadyRoomStorageCoordinator {
         )
         let localRoot = localBase.appendingPathComponent("ReadyRoom", isDirectory: true)
         try fileManager.createDirectory(at: localRoot, withIntermediateDirectories: true)
-
-        let sharedRoot = fileManager
-            .url(forUbiquityContainerIdentifier: nil)?
-            .appendingPathComponent("Documents", isDirectory: true)
-            .appendingPathComponent("ReadyRoom", isDirectory: true)
-
-        if let sharedRoot {
-            try? fileManager.createDirectory(at: sharedRoot, withIntermediateDirectories: true)
-        }
-
-        return StorageRoots(localRoot: localRoot, sharedRoot: sharedRoot)
+        return localRoot
     }
 
     public func url(for relativePath: String, scope: StorageScope) throws -> URL {
@@ -145,7 +205,8 @@ public actor ReadyRoomStorageCoordinator {
         let localFiles = try [
             fileStatus(label: "Dashboard Layout", relativePath: "Local/dashboard-layout.json", scope: .local),
             fileStatus(label: "Setup Progress", relativePath: "Local/setup-progress.json", scope: .local),
-            fileStatus(label: "Machine Identity", relativePath: "Local/machine-identity.json", scope: .local)
+            fileStatus(label: "Machine Identity", relativePath: "Local/machine-identity.json", scope: .local),
+            fileStatus(label: "Storage Preferences", relativePath: storagePreferencesPath, scope: .local)
         ]
 
         return StorageStatus(roots: roots, sharedFiles: sharedFiles, localFiles: localFiles)

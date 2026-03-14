@@ -364,7 +364,8 @@ struct ReadyRoomFoundationTests {
     func storageRootsUseLocalFallbackWhenICloudRootIsUnavailable() {
         let roots = StorageRoots(
             localRoot: URL(filePath: "/tmp/ReadyRoom"),
-            sharedRoot: nil
+            sharedRoot: nil,
+            sharedMode: .localFallback
         )
 
         #expect(roots.sharedMode == .localFallback)
@@ -373,11 +374,25 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func storageRootsUseCustomFolderWithoutNeedingMatchingAbsolutePathsAcrossMacs() {
+        let roots = StorageRoots(
+            localRoot: URL(filePath: "/tmp/ReadyRoom"),
+            sharedRoot: URL(filePath: "/Users/example/Resilio Sync/Ready Room Shared"),
+            sharedMode: .customFolder
+        )
+
+        #expect(roots.sharedMode == .customFolder)
+        #expect(roots.syncsAcrossMacs)
+        #expect(roots.effectiveSharedRoot.path == "/Users/example/Resilio Sync/Ready Room Shared")
+    }
+
+    @Test
     func storageStatusFallbackMessagingExplainsLocalFallbackWithoutCallingFilesMissing() {
         let status = StorageStatus(
             roots: StorageRoots(
                 localRoot: URL(filePath: "/tmp/ReadyRoom"),
-                sharedRoot: nil
+                sharedRoot: nil,
+                sharedMode: .localFallback
             ),
             sharedFiles: [],
             localFiles: []
@@ -386,6 +401,23 @@ struct ReadyRoomFoundationTests {
         #expect(status.summary.contains("local fallback folder"))
         #expect(status.summary.contains("not syncing across computers yet"))
         #expect(status.detail.contains("not signed with iCloud entitlements yet"))
+    }
+
+    @Test
+    func storageStatusCustomFolderMessagingExplainsLocalPerMacPath() {
+        let status = StorageStatus(
+            roots: StorageRoots(
+                localRoot: URL(filePath: "/tmp/ReadyRoom"),
+                sharedRoot: URL(filePath: "/Users/example/Resilio Sync/Ready Room Shared"),
+                sharedMode: .customFolder
+            ),
+            sharedFiles: [],
+            localFiles: []
+        )
+
+        #expect(status.summary.contains("custom shared folder"))
+        #expect(status.detail.contains("stored locally on this Mac"))
+        #expect(status.detail.contains("different absolute Resilio Sync path"))
     }
 
     @Test

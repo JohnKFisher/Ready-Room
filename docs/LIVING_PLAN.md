@@ -41,6 +41,7 @@ Implemented in this foundation pass:
 - the Storage/Sync screen now distinguishes between iCloud not being active for the current build/Mac and files simply not having been created yet
 - obligation occurrences now use the same carry-yesterday-until-3:00-AM day boundary as the timeline, so late-night recurring items stay attached to the expected day group
 - multi-day all-day events now appear on each day they cover in the timeline instead of only their start day, and they are only marked complete after their final covered day
+- Storage/Sync now supports a machine-local custom shared folder so different Macs can point Ready Room at different absolute Resilio Sync paths without syncing the path setting itself
 
 Still open after this pass:
 

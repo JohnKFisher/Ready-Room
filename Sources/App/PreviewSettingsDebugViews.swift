@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import WebKit
 import ReadyRoomCore
@@ -330,7 +331,7 @@ private struct StorageSyncSettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Storage/Sync")
                         .font(.headline)
-                    Text("Ready Room keeps shared data in iCloud Drive when this build and this Mac support it. Until then, it uses a local fallback folder on this Mac. Files marked Not Created Yet are normal until that part of the app saves data for the first time.")
+                    Text("Ready Room can use iCloud Drive, a custom shared folder, or a local fallback folder. Custom folder paths are stored locally on each Mac, so your Mac mini and other Mac can point to different absolute Resilio Sync paths while sharing the same files.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -338,6 +339,31 @@ private struct StorageSyncSettingsView: View {
                     Task { await model.refreshStorageStatus() }
                 }
             }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Custom Shared Folder")
+                    .font(.headline)
+                Text("Choose the dedicated Resilio-synced folder Ready Room should use on this Mac. This folder path is local-only and is not synced to your other Mac.")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Choose Shared Folder...") {
+                        chooseCustomSharedFolder()
+                    }
+                    Button("Use Automatic/Local Fallback") {
+                        Task { await model.setCustomSharedFolder(nil) }
+                    }
+                    .disabled(model.storagePreferences.customSharedRoot == nil)
+                }
+                if let customSharedRoot = model.storagePreferences.customSharedRoot {
+                    storagePathRow(title: "Selected on This Mac", url: customSharedRoot)
+                    Text("Existing shared files are not automatically moved when you change folders. New reads and writes will use the folder selected on this Mac.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
 
             if let status = model.storageStatus {
                 VStack(alignment: .leading, spacing: 12) {
@@ -357,7 +383,7 @@ private struct StorageSyncSettingsView: View {
                     storagePathRow(title: "Local Root", url: status.roots.localRoot)
                     storagePathRow(title: "Effective Shared Root", url: status.roots.effectiveSharedRoot)
                     if let sharedRoot = status.roots.sharedRoot {
-                        storagePathRow(title: "iCloud Shared Root", url: sharedRoot)
+                        storagePathRow(title: sharedRootTitle(for: status.roots.sharedMode), url: sharedRoot)
                     }
                 }
                 .padding()
@@ -366,7 +392,7 @@ private struct StorageSyncSettingsView: View {
 
                 storageFilesCard(
                     title: "Shared Across Macs",
-                    subtitle: status.roots.syncsAcrossMacs ? "These files live in iCloud Drive and should sync across your Macs." : "These files are using a local fallback folder right now, so changes stay on this Mac until iCloud Drive is active.",
+                    subtitle: sharedFilesSubtitle(for: status.roots.sharedMode),
                     files: status.sharedFiles
                 )
 
@@ -387,6 +413,47 @@ private struct StorageSyncSettingsView: View {
             } else {
                 ProgressView("Loading storage status...")
             }
+        }
+    }
+
+    private func chooseCustomSharedFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Shared Folder"
+        panel.message = "Choose the Resilio-synced folder Ready Room should use for shared files on this Mac."
+        panel.prompt = "Use Folder"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        Task {
+            await model.setCustomSharedFolder(url)
+        }
+    }
+
+    private func sharedRootTitle(for mode: SharedStorageMode) -> String {
+        switch mode {
+        case .iCloudDrive:
+            "iCloud Shared Root"
+        case .customFolder:
+            "Custom Shared Root"
+        case .localFallback:
+            "Effective Shared Root"
+        }
+    }
+
+    private func sharedFilesSubtitle(for mode: SharedStorageMode) -> String {
+        switch mode {
+        case .iCloudDrive:
+            "These files live in iCloud Drive and should sync across your Macs."
+        case .customFolder:
+            "These files live in the custom folder selected on this Mac. If your other Macs point Ready Room at synced copies of the same folder, these files should sync without iCloud."
+        case .localFallback:
+            "These files are using a local fallback folder right now, so changes stay on this Mac until shared storage is configured."
         }
     }
 

@@ -59,6 +59,7 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var preferredMode: NarrativeGenerationMode = .foundationModels
     @Published var machineIdentifier = ""
     @Published var primarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: "")
+    @Published var storagePreferences = StoragePreferences()
     @Published var storageStatus: StorageStatus?
     @Published var storageStatusError: String?
     @Published var debugJSON = ""
@@ -191,11 +192,25 @@ final class ReadyRoomAppModel: ObservableObject {
 
     func refreshStorageStatus() async {
         do {
+            storagePreferences = try await storageCoordinator.loadStoragePreferences()
             storageStatus = try await storageCoordinator.describeStorageStatus()
             storageStatusError = nil
         } catch {
             storageStatus = nil
             storageStatusError = error.localizedDescription
+        }
+    }
+
+    func setCustomSharedFolder(_ url: URL?) async {
+        do {
+            try await storageCoordinator.setCustomSharedRoot(url)
+            lastKnownObligationsModifiedAt = nil
+            await refreshStorageStatus()
+            await refresh()
+            statusMessage = url == nil ? "Using local fallback shared storage." : "Updated the shared folder for this Mac."
+        } catch {
+            storageStatusError = error.localizedDescription
+            statusMessage = "Could not update shared folder: \(error.localizedDescription)"
         }
     }
 
