@@ -70,15 +70,15 @@ public struct StorageStatus: Sendable {
         if roots.syncsAcrossMacs {
             return "Shared files are using iCloud Drive and should sync across Macs signed into the same iCloud account."
         }
-        return "Shared files are currently falling back to a local folder on this Mac, so they will not sync across computers yet."
+        return "Shared files are currently stored in a local fallback folder on this Mac, so they are not syncing across computers yet."
     }
 
     public var detail: String {
         switch roots.sharedMode {
         case .iCloudDrive:
-            "Shared app data is stored in iCloud Drive."
+            "Shared app data is stored in Ready Room's iCloud Drive documents folder."
         case .localFallback:
-            "iCloud Drive storage is unavailable to this app right now, so shared files are being stored locally instead."
+            "iCloud Drive is not active for Ready Room on this Mac right now. That usually means this build is not signed with iCloud entitlements yet, or iCloud Drive is unavailable for the current macOS account."
         }
     }
 }

@@ -330,7 +330,7 @@ private struct StorageSyncSettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Storage/Sync")
                         .font(.headline)
-                    Text("Shared files should live in iCloud Drive when available. If not, the app falls back to a local-only shared folder on this Mac.")
+                    Text("Ready Room keeps shared data in iCloud Drive when this build and this Mac support it. Until then, it uses a local fallback folder on this Mac. Files marked Not Created Yet are normal until that part of the app saves data for the first time.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -366,7 +366,7 @@ private struct StorageSyncSettingsView: View {
 
                 storageFilesCard(
                     title: "Shared Across Macs",
-                    subtitle: status.roots.syncsAcrossMacs ? "These files are in iCloud Drive and should sync." : "These files are currently falling back to a local folder, so they will not sync yet.",
+                    subtitle: status.roots.syncsAcrossMacs ? "These files live in iCloud Drive and should sync across your Macs." : "These files are using a local fallback folder right now, so changes stay on this Mac until iCloud Drive is active.",
                     files: status.sharedFiles
                 )
 
@@ -396,12 +396,15 @@ private struct StorageSyncSettingsView: View {
                 .font(.headline)
             Text(subtitle)
                 .foregroundStyle(.secondary)
+            Text("Not Created Yet is normal until that feature saves something for the first time.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             ForEach(files) { file in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
                         Text(file.label)
                             .font(.subheadline.weight(.semibold))
-                        Text(file.exists ? "Present" : "Missing")
+                        Text(file.exists ? "Created" : "Not Created Yet")
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -412,6 +415,10 @@ private struct StorageSyncSettingsView: View {
                         .textSelection(.enabled)
                     if let modifiedAt = file.modifiedAt {
                         Text("Last modified: \(modifiedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("This file will appear after Ready Room saves data for this area.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

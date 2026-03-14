@@ -283,6 +283,22 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func storageStatusFallbackMessagingExplainsLocalFallbackWithoutCallingFilesMissing() {
+        let status = StorageStatus(
+            roots: StorageRoots(
+                localRoot: URL(filePath: "/tmp/ReadyRoom"),
+                sharedRoot: nil
+            ),
+            sharedFiles: [],
+            localFiles: []
+        )
+
+        #expect(status.summary.contains("local fallback folder"))
+        #expect(status.summary.contains("not syncing across computers yet"))
+        #expect(status.detail.contains("not signed with iCloud entitlements yet"))
+    }
+
+    @Test
     func sharedObligationSyncGateReloadsWhenSharedFileChanges() {
         let earlier = Calendar.readyRoomGregorian.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 0, minute: 0))!
         let later = earlier.addingTimeInterval(60)
