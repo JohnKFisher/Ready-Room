@@ -118,4 +118,18 @@ struct ReadyRoomFoundationTests {
 
         #expect(shouldSend == false)
     }
+
+    @Test
+    func dictionaryBuilderKeepsLastDuplicateValueInsteadOfCrashing() {
+        let dictionary = ReadyRoomCollections.dictionaryLastValueWins(
+            from: [
+                ("shared", 1),
+                ("shared", 2),
+                ("other", 3)
+            ]
+        )
+
+        #expect(dictionary["shared"] == 2)
+        #expect(dictionary["other"] == 3)
+    }
 }

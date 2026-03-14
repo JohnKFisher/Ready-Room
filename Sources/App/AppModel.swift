@@ -188,8 +188,12 @@ final class ReadyRoomAppModel: ObservableObject {
         mediaItems = mediaSnapshot?.mediaItems ?? []
 
         let configurations = (try? await calendarStore.load()) ?? []
-        let configMap = Dictionary(uniqueKeysWithValues: configurations.map { ($0.calendarIdentifier, $0) })
-        let previous = Dictionary(uniqueKeysWithValues: normalizedItems.map { ($0.id, $0) })
+        let configMap = ReadyRoomCollections.dictionaryLastValueWins(
+            from: configurations.map { ($0.calendarIdentifier, $0) }
+        )
+        let previous = ReadyRoomCollections.dictionaryLastValueWins(
+            from: normalizedItems.map { ($0.id, $0) }
+        )
         let calendarItems = rulesEngine.normalizeCalendarEvents(
             calendarSnapshot?.calendarEvents ?? [],
             source: calendarSnapshot?.source ?? SourceDescriptor(id: "sample-calendar", displayName: "Sample Calendar", type: .calendar),

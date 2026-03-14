@@ -28,7 +28,7 @@ public actor EventKitCalendarConnector: SourceConnector {
         let events = store.events(matching: predicate)
             .map { event in
                 RawCalendarEvent(
-                    id: event.eventIdentifier ?? UUID().uuidString,
+                    id: stableEventIdentifier(for: event),
                     calendarIdentifier: event.calendar.calendarIdentifier,
                     calendarTitle: event.calendar.title,
                     title: event.title,
@@ -71,5 +71,13 @@ public actor EventKitCalendarConnector: SourceConnector {
                 }
             }
         }
+    }
+
+    private func stableEventIdentifier(for event: EKEvent) -> String {
+        let calendar = Calendar.readyRoomGregorian
+        let dayAnchor = calendar.startOfDay(for: event.startDate)
+        let dayToken = Int(dayAnchor.timeIntervalSince1970)
+        let base = event.eventIdentifier ?? event.calendarItemIdentifier
+        return "\(event.calendar.calendarIdentifier)|\(base)|\(dayToken)"
     }
 }
