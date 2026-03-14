@@ -67,47 +67,169 @@ struct ObligationsView: View {
     @ObservedObject var model: ReadyRoomAppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Obligations")
-                .font(.largeTitle.weight(.bold))
-            TextField("Mortgage due every month on the 15th, remind me 7 and 3 days before", text: $model.obligationDraft)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                Button("Parse") { model.parseObligationDraft() }
-                Button("Save Parsed Item") {
-                    Task { await model.saveParsedObligation() }
-                }
-                .disabled(model.parsedObligationCandidate?.structured == nil)
-            }
-
-            if let parsed = model.parsedObligationCandidate {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("I understood this as...")
-                        .font(.headline)
-                    Text(parsed.explanation)
-                    if let structured = parsed.structured {
-                        Text("Structured title: \(structured.title)")
-                        Text("Lead days: \(structured.reminderLeadDays.map(String.init).joined(separator: ", "))")
-                        Text("Schedule: \(structured.schedule.kind.rawValue)")
+        HStack(alignment: .top, spacing: 20) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Obligations")
+                    .font(.largeTitle.weight(.bold))
+                TextField("Mortgage due every month on the 15th, remind me 7 and 3 days before", text: $model.obligationDraft)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Button("Parse") { model.parseObligationDraft() }
+                    if model.obligationEditor != nil {
+                        Button(model.isEditingSavedObligation ? "Save Changes" : "Save Obligation") {
+                            Task { await model.saveObligationEditor() }
+                        }
                     }
-                    if !parsed.missingFields.isEmpty {
-                        Text("Missing: \(parsed.missingFields.joined(separator: ", "))")
-                            .foregroundStyle(.orange)
+                    if model.obligationEditor != nil {
+                        Button("Cancel") { model.cancelObligationEditing() }
                     }
                 }
-                .padding()
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-            }
 
-            List(model.obligations) { obligation in
+                if let parsed = model.parsedObligationCandidate, let editor = model.obligationEditor {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(model.isEditingSavedObligation ? "Editing saved obligation" : "I understood this as...")
+                            .font(.headline)
+                        Text("You can edit this explanation and any of the structured fields before saving.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: binding(\.explanation))
+                            .font(.body)
+                            .frame(minHeight: 72)
+                            .padding(10)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+                        if !parsed.missingFields.isEmpty {
+                            Text("Missing: \(parsed.missingFields.joined(separator: ", "))")
+                                .foregroundStyle(.orange)
+                        }
+
+                        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 10) {
+                            GridRow {
+                                Text("Title")
+                                TextField("Title", text: binding(\.title))
+                            }
+                            GridRow {
+                                Text("Owner")
+                                Picker("Owner", selection: binding(\.owner)) {
+                                    Text("Family / Unspecified").tag(PersonID?.none)
+                                    Text("John").tag(PersonID?.some(.john))
+                                    Text("Amy").tag(PersonID?.some(.amy))
+                                    Text("Ellie").tag(PersonID?.some(.ellie))
+                                    Text("Mia").tag(PersonID?.some(.mia))
+                                }
+                                .pickerStyle(.menu)
+                            }
+                            GridRow {
+                                Text("Schedule")
+                                Picker("Schedule", selection: binding(\.scheduleKind)) {
+                                    ForEach(ObligationScheduleKind.allCases, id: \.self) { kind in
+                                        Text(kind.rawValue.capitalized).tag(kind)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            }
+                            GridRow {
+                                Text("Lead Days")
+                                TextField("7, 3", text: binding(\.reminderLeadDaysText))
+                            }
+                            GridRow {
+                                Text("Notes")
+                                TextField("Optional notes", text: binding(\.notes))
+                            }
+                            GridRow {
+                                Text("Source Text")
+                                TextField("Original sentence", text: binding(\.originalEntry))
+                            }
+                        }
+
+                        scheduleEditor(for: editor)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(obligation.title)
-                    Text(obligation.explanation ?? obligation.schedule.kind.rawValue.capitalized)
+                    Text("Saved Obligations")
+                        .font(.headline)
+                    Text("Click any saved item to edit it.")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                if model.obligations.isEmpty {
+                    ContentUnavailableView("No Saved Obligations", systemImage: "checklist", description: Text("Parse and save an obligation to start building your list."))
+                        .frame(minWidth: 320, minHeight: 220)
+                } else {
+                    List(model.obligations) { obligation in
+                        Button {
+                            model.beginEditingObligation(obligation)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(obligation.title)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(obligation.explanation ?? obligation.schedule.kind.rawValue.capitalized)
+                                    .foregroundStyle(.secondary)
+                                if let originalEntry = obligation.originalEntry, !originalEntry.isEmpty {
+                                    Text(originalEntry)
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(model.selectedObligationID == obligation.id ? Color.accentColor.opacity(0.12) : Color.clear)
+                    }
+                    .frame(minWidth: 320)
+                }
             }
+            .frame(width: 360, alignment: .topLeading)
         }
         .padding(24)
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<ObligationEditorDraft, Value>) -> Binding<Value> {
+        Binding {
+            model.obligationEditor?[keyPath: keyPath] ?? fallbackValue(for: keyPath)
+        } set: { newValue in
+            model.updateObligationEditor { $0[keyPath: keyPath] = newValue }
+        }
+    }
+
+    private func fallbackValue<Value>(for keyPath: WritableKeyPath<ObligationEditorDraft, Value>) -> Value {
+        ObligationEditorDraft(
+            record: ObligationRecord(
+                title: "",
+                schedule: ObligationSchedule(kind: .oneTime)
+            )
+        )[keyPath: keyPath]
+    }
+
+    @ViewBuilder
+    private func scheduleEditor(for editor: ObligationEditorDraft) -> some View {
+        switch editor.scheduleKind {
+        case .oneTime, .custom:
+            DatePicker("Due Date", selection: binding(\.dueDate), displayedComponents: .date)
+            if editor.scheduleKind == .custom {
+                TextField("Custom rule", text: binding(\.customRule))
+                    .textFieldStyle(.roundedBorder)
+            }
+        case .weekly:
+            TextField("Weekdays (1=Sun ... 7=Sat)", text: binding(\.weekdaysText))
+                .textFieldStyle(.roundedBorder)
+        case .monthly:
+            Stepper("Day of month: \(editor.dayOfMonth)", value: binding(\.dayOfMonth), in: 1...31)
+        case .yearly:
+            Stepper("Month: \(editor.monthOfYear)", value: binding(\.monthOfYear), in: 1...12)
+            Stepper("Day: \(editor.dayOfMonth)", value: binding(\.dayOfMonth), in: 1...31)
+        }
     }
 }
 

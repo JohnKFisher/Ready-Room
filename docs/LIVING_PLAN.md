@@ -31,6 +31,7 @@ Implemented in this foundation pass:
 - deterministic briefing composer with preferred-vs-actual AI mode disclosure
 - sender abstraction, scheduled-send coordination logic, and an Apple Mail sender implementation path
 - SwiftUI app shell for dashboard, preview, obligations, settings, and debug flows
+- obligations editor now supports post-parse field edits, inline explanation editing, and click-to-edit for saved items
 
 Still open after this pass:
 
@@ -52,4 +53,3 @@ Still open after this pass:
 - Foundation Models integration is intentionally wrapped behind a provider boundary because the deterministic fallback must remain the trustworthy path.
 - Apple Mail automation will require runtime Apple Events authorization and real-machine testing before it should be trusted for scheduled sending.
 - iCloud shared storage and duplicate-send protection must be validated with two Macs before the scheduler is considered production-safe.
-

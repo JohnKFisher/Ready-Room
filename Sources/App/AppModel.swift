@@ -49,6 +49,8 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var obligations: [ObligationRecord] = []
     @Published var obligationDraft = ""
     @Published var parsedObligationCandidate: ParsedObligationCandidate?
+    @Published var obligationEditor: ObligationEditorDraft?
+    @Published var selectedObligationID: String?
     @Published var statusMessage = "Loading Ready Room..."
     @Published var showSendChooser = false
     @Published var compareBriefingModes = false
@@ -105,22 +107,71 @@ final class ReadyRoomAppModel: ObservableObject {
     }
 
     func parseObligationDraft() {
-        parsedObligationCandidate = parser.parse(obligationDraft, now: now)
+        let parsed = parser.parse(obligationDraft, now: now)
+        parsedObligationCandidate = parsed
+        obligationEditor = parsed.structured.map(ObligationEditorDraft.init(record:))
+        selectedObligationID = nil
     }
 
-    func saveParsedObligation() async {
-        guard let structured = parsedObligationCandidate?.structured else {
+    func updateObligationEditor(_ mutate: (inout ObligationEditorDraft) -> Void) {
+        guard var editor = obligationEditor else {
             return
         }
-        obligations.append(structured)
+        mutate(&editor)
+        obligationEditor = editor
+        if var candidate = parsedObligationCandidate {
+            candidate.structured = editor.materializedRecord()
+            candidate.explanation = editor.explanation.isEmpty ? candidate.explanation : editor.explanation
+            parsedObligationCandidate = candidate
+        }
+    }
+
+    func beginEditingObligation(_ obligation: ObligationRecord) {
+        selectedObligationID = obligation.id
+        obligationDraft = obligation.originalEntry ?? obligation.title
+        let explanation = obligation.explanation ?? "Editing saved obligation."
+        parsedObligationCandidate = ParsedObligationCandidate(
+            originalText: obligation.originalEntry ?? obligation.title,
+            structured: obligation,
+            explanation: explanation,
+            confidence: 1.0
+        )
+        obligationEditor = ObligationEditorDraft(record: obligation)
+    }
+
+    func cancelObligationEditing() {
+        selectedObligationID = nil
+        obligationEditor = nil
+        parsedObligationCandidate = nil
+    }
+
+    func saveObligationEditor() async {
+        guard let editor = obligationEditor else {
+            return
+        }
+        let record = editor.materializedRecord()
+        let existingIndex = obligations.firstIndex(where: { $0.id == record.id })
+        if let existingIndex {
+            obligations[existingIndex] = record
+        } else {
+            obligations.append(record)
+        }
         do {
             try await obligationsStore.save(obligations)
             obligationDraft = ""
-            parsedObligationCandidate = nil
+            cancelObligationEditing()
+            statusMessage = existingIndex == nil ? "Saved obligation." : "Updated obligation."
             await refresh()
         } catch {
             statusMessage = "Could not save obligation: \(error.localizedDescription)"
         }
+    }
+
+    var isEditingSavedObligation: Bool {
+        guard let editor = obligationEditor else {
+            return false
+        }
+        return obligations.contains(where: { $0.id == editor.id })
     }
 
     func moveCard(_ kind: DashboardCardKind, direction: Int) {

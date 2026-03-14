@@ -71,7 +71,8 @@ let package = Package(
             dependencies: [
                 "ReadyRoomCore",
                 "ReadyRoomPersistence",
-                "ReadyRoomBriefings"
+                "ReadyRoomBriefings",
+                "ReadyRoomApp"
             ],
             path: "Tests/ReadyRoomTests"
         )

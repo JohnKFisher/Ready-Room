@@ -3,6 +3,7 @@ import Testing
 @testable import ReadyRoomCore
 @testable import ReadyRoomPersistence
 @testable import ReadyRoomBriefings
+@testable import ReadyRoomApp
 
 struct ReadyRoomFoundationTests {
     @Test
@@ -131,5 +132,34 @@ struct ReadyRoomFoundationTests {
 
         #expect(dictionary["shared"] == 2)
         #expect(dictionary["other"] == 3)
+    }
+
+    @Test
+    func obligationEditorDraftPersistsEditableExplanationAndOriginalEntry() {
+        let dueDate = Calendar.readyRoomGregorian.date(from: DateComponents(year: 2026, month: 3, day: 20))!
+        let record = ObligationRecord(
+            id: "mortgage",
+            title: "Mortgage",
+            notes: "Autopay check",
+            owner: .john,
+            schedule: ObligationSchedule(kind: .monthly, dueDate: dueDate, dayOfMonth: 15),
+            reminderLeadDays: [7, 3],
+            originalEntry: "Mortgage due every month on the 15th",
+            explanation: "Monthly household bill."
+        )
+
+        var draft = ObligationEditorDraft(record: record)
+        draft.title = "Mortgage Payment"
+        draft.originalEntry = "Mortgage due on the 15th, remind me ahead of time"
+        draft.explanation = "I understood this as a monthly payment reminder."
+        draft.reminderLeadDaysText = "10, 3"
+
+        let updated = draft.materializedRecord()
+
+        #expect(updated.id == "mortgage")
+        #expect(updated.title == "Mortgage Payment")
+        #expect(updated.originalEntry == "Mortgage due on the 15th, remind me ahead of time")
+        #expect(updated.explanation == "I understood this as a monthly payment reminder.")
+        #expect(updated.reminderLeadDays == [10, 3])
     }
 }
