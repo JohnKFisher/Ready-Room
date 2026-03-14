@@ -18,11 +18,17 @@ struct DashboardView: View {
 
     private var groupedTimeline: [TimelineDayGroup] {
         let calendar = Calendar.readyRoomGregorian
-        let grouped = Dictionary(grouping: timelineItems) { item in
-            calendar.startOfDay(for: item.startDate ?? model.now)
+        let placements = timelineItems.flatMap { item in
+            DashboardTimelinePolicy.displayDays(item, now: model.now, calendar: calendar).map { day in
+                TimelinePlacement(date: day, item: item)
+            }
+        }
+        let grouped = Dictionary(grouping: placements) { placement in
+            placement.date
         }
         return grouped.keys.sorted().map { date in
-            let items = grouped[date] ?? []
+            let dayPlacements: [TimelinePlacement] = grouped[date] ?? []
+            let items = dayPlacements.map(\.item)
             let sortedItems = items.sorted { lhs, rhs in
                 switch (lhs.startDate, rhs.startDate) {
                 case let (lhsDate?, rhsDate?):
@@ -328,6 +334,11 @@ private struct TimelineDayGroup: Identifiable {
     var isToday: Bool { Calendar.readyRoomGregorian.isDateInToday(date) }
 }
 
+private struct TimelinePlacement {
+    let date: Date
+    let item: NormalizedItem
+}
+
 private struct TimelineItemView: View {
     let item: NormalizedItem
     let now: Date
@@ -509,8 +520,32 @@ enum DashboardTimelinePolicy {
     }
 
     static func includes(_ item: NormalizedItem, now: Date, calendar: Calendar = .readyRoomGregorian) -> Bool {
-        let anchorDate = (item.startDate ?? now).startOfDay(in: calendar)
-        return anchorDate >= earliestVisibleDay(for: now, calendar: calendar)
+        !displayDays(item, now: now, calendar: calendar).isEmpty
+    }
+
+    static func displayDays(_ item: NormalizedItem, now: Date, calendar: Calendar = .readyRoomGregorian) -> [Date] {
+        let visibleStart = earliestVisibleDay(for: now, calendar: calendar)
+        guard let startDate = item.startDate else {
+            return [visibleStart]
+        }
+
+        let startDay = startDate.startOfDay(in: calendar)
+        guard item.isAllDay else {
+            return startDay >= visibleStart ? [startDay] : []
+        }
+
+        let lastDay = lastCoveredDay(for: item, calendar: calendar) ?? startDay
+        guard lastDay >= visibleStart else {
+            return []
+        }
+
+        var days: [Date] = []
+        var cursor = max(startDay, visibleStart)
+        while cursor <= lastDay {
+            days.append(cursor)
+            cursor = cursor.adding(days: 1, calendar: calendar)
+        }
+        return days
     }
 
     static func isCompleted(_ item: NormalizedItem, now: Date, calendar: Calendar = .readyRoomGregorian) -> Bool {
@@ -518,15 +553,32 @@ enum DashboardTimelinePolicy {
             return false
         }
         if item.isAllDay {
-            guard let startDate = item.startDate else {
+            guard let lastDay = lastCoveredDay(for: item, calendar: calendar) else {
                 return false
             }
-            return startDate.startOfDay(in: calendar) < now.startOfDay(in: calendar)
+            return lastDay < now.startOfDay(in: calendar)
         }
         guard let endDate = item.endDate else {
             return false
         }
         return endDate < now
+    }
+
+    static func lastCoveredDay(for item: NormalizedItem, calendar: Calendar = .readyRoomGregorian) -> Date? {
+        guard let startDate = item.startDate else {
+            return nil
+        }
+
+        let startDay = startDate.startOfDay(in: calendar)
+        guard item.isAllDay, let endDate = item.endDate else {
+            return startDay
+        }
+
+        let endDay = endDate.startOfDay(in: calendar)
+        if endDay > startDay {
+            return endDay.adding(days: -1, calendar: calendar)
+        }
+        return startDay
     }
 }
 

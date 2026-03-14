@@ -312,6 +312,55 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func multiDayAllDayEventShowsOnEachCoveredVisibleDay() {
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 10, minute: 0))!
+        let item = NormalizedItem(
+            id: "calendar:trip",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "trip",
+            sourceType: .calendar,
+            title: "Amy - Chicago",
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 13))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 16))!,
+            isAllDay: true
+        )
+
+        let days = DashboardTimelinePolicy.displayDays(item, now: now, calendar: calendar)
+
+        #expect(days == [
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 14))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 15))!
+        ])
+        #expect(DashboardTimelinePolicy.includes(item, now: now, calendar: calendar))
+        #expect(DashboardTimelinePolicy.isCompleted(item, now: now, calendar: calendar) == false)
+    }
+
+    @Test
+    func multiDayAllDayEventIncludesStartDayDuringCarryWindow() {
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 1, minute: 30))!
+        let item = NormalizedItem(
+            id: "calendar:trip-carry",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "trip-carry",
+            sourceType: .calendar,
+            title: "Amy - Chicago",
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 13))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 16))!,
+            isAllDay: true
+        )
+
+        let days = DashboardTimelinePolicy.displayDays(item, now: now, calendar: calendar)
+
+        #expect(days == [
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 13))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 14))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 15))!
+        ])
+    }
+
+    @Test
     func storageRootsUseLocalFallbackWhenICloudRootIsUnavailable() {
         let roots = StorageRoots(
             localRoot: URL(filePath: "/tmp/ReadyRoom"),
