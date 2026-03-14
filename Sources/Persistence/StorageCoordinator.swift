@@ -115,9 +115,13 @@ public actor ReadyRoomStorageCoordinator {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let storagePreferencesPath = "Local/storage-preferences.json"
+    private let localRootOverride: URL?
+    private let sharedRootOverride: URL?
 
-    public init(fileManager: FileManager = .default) {
+    public init(fileManager: FileManager = .default, localRootOverride: URL? = nil, sharedRootOverride: URL? = nil) {
         self.fileManager = fileManager
+        self.localRootOverride = localRootOverride
+        self.sharedRootOverride = sharedRootOverride
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
         self.encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -127,6 +131,10 @@ public actor ReadyRoomStorageCoordinator {
 
     public func resolveRoots() throws -> StorageRoots {
         let localRoot = try resolveLocalRoot()
+        if let sharedRootOverride {
+            try? fileManager.createDirectory(at: sharedRootOverride, withIntermediateDirectories: true)
+            return StorageRoots(localRoot: localRoot, sharedRoot: sharedRootOverride, sharedMode: .customFolder)
+        }
         let preferences = try loadStoragePreferences()
 
         if let customSharedRoot = preferences.customSharedRoot?.standardizedFileURL {
@@ -170,6 +178,10 @@ public actor ReadyRoomStorageCoordinator {
     }
 
     private func resolveLocalRoot() throws -> URL {
+        if let localRootOverride {
+            try fileManager.createDirectory(at: localRootOverride, withIntermediateDirectories: true)
+            return localRootOverride
+        }
         let localBase = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -200,7 +212,8 @@ public actor ReadyRoomStorageCoordinator {
             fileStatus(label: "Calendar Configurations", relativePath: "Shared/calendar-configurations.json", scope: .shared),
             fileStatus(label: "Briefing Archive", relativePath: "Shared/briefing-archive.json", scope: .shared),
             fileStatus(label: "Send Records", relativePath: "Shared/send-records.json", scope: .shared),
-            fileStatus(label: "Sender Settings", relativePath: "Shared/sender-settings.json", scope: .shared)
+            fileStatus(label: "Sender Settings", relativePath: "Shared/sender-settings.json", scope: .shared),
+            fileStatus(label: "Weather Settings", relativePath: "Shared/weather-settings.json", scope: .shared)
         ]
 
         let localFiles = try [

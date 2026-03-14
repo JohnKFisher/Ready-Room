@@ -46,11 +46,12 @@ Implemented in this foundation pass:
 - generated briefings now carry a prominent early-development warning banner and explicitly label placeholder-derived weather, news, media, and calendar content
 - scheduled-send dedupe now distinguishes manual test sends from scheduled sends, and the Apple Mail sender now emits a readable compatibility-formatted plain-text message instead of literal HTML tags
 - briefing event lines now include explicit dates as well as times so previewed and sent briefings are readable without relying on section context alone
+- Weather now has a real shared configuration screen: it defaults to ZIP `08854`, resolves ZIP or city/state input through Apple location search, fetches live conditions from Open-Meteo, and shows an SF Symbol in the dashboard instead of sample placeholder weather
 - `docs/WHERE_WE_STAND.md` now captures the current implemented/partial/missing status and should be regenerated on future major or minor version bumps
 
 Still open after this pass:
 
-- richer live connector configuration and authentication UX
+- richer live connector configuration and authentication UX beyond weather's Apple-location/Open-Meteo hybrid path
 - production-grade Foundation Models prompt integration
 - full setup wizard persistence and permissions UX
 - app bundling/signing refinement and runtime smoke-testing against real local services

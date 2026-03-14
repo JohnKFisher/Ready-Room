@@ -65,9 +65,10 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 ### Live Data Connectors
 - EventKit calendars are partly real and actively used
-- weather/news/media connector code exists
-- but weather, news, and media are still often placeholder-driven in normal use
-- configuration UX for these connectors is still mostly missing
+- weather now has a real configuration screen and live data path
+- weather location resolves through Apple location search and current conditions come from Open-Meteo
+- news and media are still mostly placeholder-driven in normal use
+- configuration UX for news and media is still mostly missing
 
 ### AI
 - templated fallback works
@@ -77,7 +78,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 ### Settings / Preferences
 - the sidebar structure exists
-- sender and storage/sync are meaningfully usable
+- sender, storage/sync, and weather are meaningfully usable
 - most other settings pages are still placeholders or explanatory shells
 
 ### Debuggability
@@ -129,7 +130,8 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 ## Known Limitations And Trust Warnings
 
-- Weather, news, and media may still be placeholder data unless explicitly wired to live sources.
+- News and media may still be placeholder data unless explicitly wired to live sources.
+- Weather now has a live path, but it depends on Apple location resolution succeeding and Open-Meteo being reachable.
 - Foundation Models is not really implemented yet.
 - Apple Mail currently sends a readable plain-text compatibility version, not a fully rendered HTML email.
 - Scheduled sending is improved, but still not fully proven as “trust it every morning without checking.”
@@ -151,12 +153,12 @@ To get useful daily behavior right now:
 
 - Morning send reliability is better than before, but still needs more real-world validation.
 - Cross-Mac coordination is practical, not fully hardened.
-- Placeholder data can still leak into daily use if live connectors are not configured.
+- Placeholder data can still leak into daily use for news and media because those connectors are not fully configured yet.
 - Some configuration areas exist in the data model but not yet in a real user-facing workflow.
 
 ## Recommended Next Priorities
 
-1. Make live weather/news/media actually usable with real configuration screens.
+1. Make live news/media actually usable with real configuration screens.
 2. Improve sender reliability and diagnostics so morning-send failures are obvious and recoverable.
 3. Build the real setup wizard and permissions guidance.
 4. Add notifications and archive/history UI.

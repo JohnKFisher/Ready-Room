@@ -97,14 +97,16 @@ struct DashboardView: View {
                         .font(.title3)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 8) {
+                        Image(systemName: model.weather?.symbolName ?? weatherFallbackSymbolName)
+                            .foregroundStyle(model.weather == nil ? .secondary : .primary)
                         Text(model.weather.map { "\($0.summary), \(Int($0.currentTemperatureF))F" } ?? "Weather unavailable")
                             .font(.headline)
                         if model.placeholderLabel(for: .weather) != nil {
                             PlaceholderBadge(text: "Placeholder")
                         }
                     }
-                    if let placeholderLabel = model.placeholderLabel(for: .weather) {
-                        Text(placeholderLabel)
+                    if let weatherNote = model.placeholderLabel(for: .weather) ?? model.sourceMessage(for: .weather) {
+                        Text(weatherNote)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -212,6 +214,7 @@ struct DashboardView: View {
                 SideCard(
                     title: cardTitle(card),
                     placeholderText: placeholderText(for: card),
+                    statusText: statusText(for: card),
                     moveUp: { model.moveCard(card, direction: -1) },
                     moveDown: { model.moveCard(card, direction: 1) }
                 ) {
@@ -229,11 +232,19 @@ struct DashboardView: View {
                         }
                     case .weather:
                         if let weather = model.weather {
-                            Text("\(weather.summary)")
+                            HStack(spacing: 8) {
+                                Image(systemName: weather.symbolName ?? weatherFallbackSymbolName)
+                                Text(weather.summary)
+                            }
                             Text("Now \(Int(weather.currentTemperatureF))F • High \(Int(weather.highF)) • Low \(Int(weather.lowF))")
                                 .foregroundStyle(.secondary)
-                        } else {
-                            Text("Weather source unavailable.")
+                            if let resolvedDisplayName = model.weatherSettings.resolvedDisplayName {
+                                Text(resolvedDisplayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else if statusText(for: .weather) == nil {
+                            Text(model.sourceMessage(for: .weather) ?? "Weather source unavailable.")
                         }
                     case .news:
                         Text(model.previewArtifacts[.john]?[model.preferredMode]?.sections.first(where: { $0.title == "In The World" })?.body ?? "No news summary yet.")
@@ -263,6 +274,17 @@ struct DashboardView: View {
         }
     }
 
+    private var weatherFallbackSymbolName: String {
+        switch model.snapshot(for: .weather)?.health.status {
+        case .healthy, .stale:
+            "cloud.fill"
+        case .unavailable, .unconfigured, .unauthorized:
+            "cloud.slash.fill"
+        case .none:
+            "cloud.fill"
+        }
+    }
+
     private func cardTitle(_ kind: DashboardCardKind) -> String {
         switch kind {
         case .dueSoon: "Due Soon"
@@ -282,6 +304,19 @@ struct DashboardView: View {
             model.placeholderLabel(for: .news)
         case .media:
             model.placeholderLabel(for: .media)
+        }
+    }
+
+    private func statusText(for kind: DashboardCardKind) -> String? {
+        switch kind {
+        case .dueSoon:
+            nil
+        case .weather:
+            model.placeholderLabel(for: .weather) == nil ? model.sourceMessage(for: .weather) : nil
+        case .news:
+            model.placeholderLabel(for: .news) == nil ? model.sourceMessage(for: .news) : nil
+        case .media:
+            model.placeholderLabel(for: .media) == nil ? model.sourceMessage(for: .media) : nil
         }
     }
 
@@ -418,6 +453,7 @@ private struct TimelineItemView: View {
 private struct SideCard<Content: View>: View {
     let title: String
     let placeholderText: String?
+    let statusText: String?
     let moveUp: () -> Void
     let moveDown: () -> Void
     @ViewBuilder let content: Content
@@ -438,6 +474,10 @@ private struct SideCard<Content: View>: View {
             }
             if let placeholderText {
                 Text(placeholderText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if let statusText {
+                Text(statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

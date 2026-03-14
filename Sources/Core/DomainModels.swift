@@ -378,17 +378,56 @@ public struct ParsedObligationCandidate: Codable, Sendable, Hashable {
 
 public struct WeatherSnapshot: Codable, Sendable, Hashable {
     public var summary: String
+    public var symbolName: String?
     public var currentTemperatureF: Double
     public var highF: Double
     public var lowF: Double
     public var fetchedAt: Date
 
-    public init(summary: String, currentTemperatureF: Double, highF: Double, lowF: Double, fetchedAt: Date = .now) {
+    public init(
+        summary: String,
+        symbolName: String? = nil,
+        currentTemperatureF: Double,
+        highF: Double,
+        lowF: Double,
+        fetchedAt: Date = .now
+    ) {
         self.summary = summary
+        self.symbolName = symbolName
         self.currentTemperatureF = currentTemperatureF
         self.highF = highF
         self.lowF = lowF
         self.fetchedAt = fetchedAt
+    }
+}
+
+public struct WeatherSettings: Codable, Sendable, Hashable {
+    public var locationQuery: String
+    public var resolvedDisplayName: String?
+    public var latitude: Double?
+    public var longitude: Double?
+    public var lastResolvedAt: Date?
+
+    public init(
+        locationQuery: String = "08854",
+        resolvedDisplayName: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        lastResolvedAt: Date? = nil
+    ) {
+        self.locationQuery = locationQuery
+        self.resolvedDisplayName = resolvedDisplayName
+        self.latitude = latitude
+        self.longitude = longitude
+        self.lastResolvedAt = lastResolvedAt
+    }
+
+    public var trimmedLocationQuery: String {
+        locationQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var hasResolvedCoordinates: Bool {
+        latitude != nil && longitude != nil
     }
 }
 

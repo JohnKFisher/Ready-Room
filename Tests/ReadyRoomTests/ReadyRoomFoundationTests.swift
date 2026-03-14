@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import ReadyRoomCore
 @testable import ReadyRoomPersistence
+@testable import ReadyRoomConnectors
 @testable import ReadyRoomBriefings
 @testable import ReadyRoomApp
 
@@ -610,6 +611,59 @@ struct ReadyRoomFoundationTests {
 
         #expect(settings.recipients(for: .john) == ["john@example.com", "family@example.com"])
         #expect(settings.recipients(for: .amy) == ["amy@example.com"])
+    }
+
+    @Test
+    func weatherSettingsDefaultToPiscatawayZipCode() {
+        let settings = WeatherSettings()
+
+        #expect(settings.locationQuery == "08854")
+        #expect(settings.hasResolvedCoordinates == false)
+    }
+
+    @Test
+    func weatherSettingsStoreRoundTripsResolvedLocation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let coordinator = ReadyRoomStorageCoordinator(
+            localRootOverride: root.appendingPathComponent("LocalRoot", isDirectory: true),
+            sharedRootOverride: root.appendingPathComponent("SharedRoot", isDirectory: true)
+        )
+        let store = WeatherSettingsStore(coordinator: coordinator)
+        let saved = WeatherSettings(
+            locationQuery: "Piscataway, NJ",
+            resolvedDisplayName: "Piscataway, NJ",
+            latitude: 40.5541,
+            longitude: -74.4643,
+            lastResolvedAt: Date(timeIntervalSince1970: 1_710_000_000)
+        )
+
+        try await store.save(saved)
+        let loaded = try await store.load()
+
+        #expect(loaded == saved)
+    }
+
+    @Test
+    func openMeteoWeatherCodeMapperProvidesReadableSummariesAndSymbols() {
+        #expect(OpenMeteoWeatherCodeMapper.summary(for: 0) == "Clear")
+        #expect(OpenMeteoWeatherCodeMapper.symbolName(for: 0) == "sun.max.fill")
+        #expect(OpenMeteoWeatherCodeMapper.summary(for: 63) == "Rainy")
+        #expect(OpenMeteoWeatherCodeMapper.symbolName(for: 95) == "cloud.bolt.rain.fill")
+    }
+
+    @Test
+    func weatherSourceSnapshotFactoryExposesUnconfiguredAndUnavailableStates() {
+        let unconfigured = WeatherSourceSnapshotFactory.unconfigured(message: "Set weather in Settings.")
+        let unavailable = WeatherSourceSnapshotFactory.unavailable(message: "Weather request failed.")
+
+        #expect(unconfigured.source.type == .weather)
+        #expect(unconfigured.health.status == .unconfigured)
+        #expect(unconfigured.health.message == "Set weather in Settings.")
+        #expect(unconfigured.placeholderLabel == nil)
+        #expect(unavailable.health.status == .unavailable)
+        #expect(unavailable.health.message == "Weather request failed.")
     }
 
     @Test

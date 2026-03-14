@@ -266,6 +266,8 @@ struct SettingsView: View {
                         settingsCard("Obligations", body: "YAML-backed obligations and the parse/approve workflow are available from the Obligations screen.")
                     case .ai:
                         settingsCard("AI", body: "Preferred order is Foundation Models, Ollama, then deterministic templates.")
+                    case .weather:
+                        WeatherSettingsView(model: model)
                     case .news:
                         settingsCard("News", body: "RSS/Atom feed sources and recipient weighting will be configured here.")
                     case .media:
@@ -308,6 +310,8 @@ struct SettingsView: View {
             "checklist"
         case .ai:
             "sparkles"
+        case .weather:
+            "cloud.sun"
         case .news:
             "newspaper"
         case .media:
@@ -319,6 +323,82 @@ struct SettingsView: View {
         case .advancedDebug:
             "ladybug"
         }
+    }
+}
+
+private struct WeatherSettingsView: View {
+    @ObservedObject var model: ReadyRoomAppModel
+    @State private var locationQuery = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Weather")
+                    .font(.headline)
+                Text("Resolve a ZIP code or city/state with Apple location search, then fetch current conditions from Open-Meteo. The saved location is shared across Macs.")
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Location")
+                    .font(.headline)
+                TextField("ZIP or city, state", text: $locationQuery)
+                    .textFieldStyle(.roundedBorder)
+                Text("Default: 08854")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Save Location") {
+                        Task { await model.saveWeatherSettings(locationQuery: locationQuery) }
+                    }
+                    Button("Refresh Weather") {
+                        Task { await model.refreshWeatherNow() }
+                    }
+                }
+                if let resolvedDisplayName = model.weatherSettings.resolvedDisplayName {
+                    Text("Resolved location: \(resolvedDisplayName)")
+                        .foregroundStyle(.secondary)
+                }
+                if let latitude = model.weatherSettings.latitude, let longitude = model.weatherSettings.longitude {
+                    Text(String(format: "Coordinates: %.4f, %.4f", latitude, longitude))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                if let lastResolvedAt = model.weatherSettings.lastResolvedAt {
+                    Text("Last resolved: \(lastResolvedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(model.weatherSettingsStatusMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let weatherError = model.weatherSettingsError {
+                    Text(weatherError)
+                        .foregroundStyle(.red)
+                }
+                if let sourceMessage = model.sourceMessage(for: .weather), model.placeholderLabel(for: .weather) == nil {
+                    Text(sourceMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .onAppear {
+            syncFromModel()
+        }
+        .onChange(of: model.weatherSettings) { _, _ in
+            syncFromModel()
+        }
+    }
+
+    private func syncFromModel() {
+        locationQuery = model.weatherSettings.locationQuery
     }
 }
 

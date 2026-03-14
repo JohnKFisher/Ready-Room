@@ -92,6 +92,23 @@ public actor SenderSettingsStore {
     }
 }
 
+public actor WeatherSettingsStore {
+    private let coordinator: ReadyRoomStorageCoordinator
+    private let path = "Shared/weather-settings.json"
+
+    public init(coordinator: ReadyRoomStorageCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    public func load() async throws -> WeatherSettings {
+        try await coordinator.loadJSON(WeatherSettings.self, relativePath: path, scope: .shared) ?? WeatherSettings()
+    }
+
+    public func save(_ settings: WeatherSettings) async throws {
+        try await coordinator.saveJSON(settings, relativePath: path, scope: .shared)
+    }
+}
+
 public actor SetupProgressStore {
     private let coordinator: ReadyRoomStorageCoordinator
     private let path = "Local/setup-progress.json"

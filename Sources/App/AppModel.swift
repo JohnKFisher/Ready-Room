@@ -23,6 +23,7 @@ final class ReadyRoomAppModel: ObservableObject {
         case dashboard = "Dashboard"
         case obligations = "Obligations"
         case ai = "AI"
+        case weather = "Weather"
         case news = "News"
         case media = "Media"
         case storageSync = "Storage/Sync"
@@ -60,6 +61,9 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var machineIdentifier = ""
     @Published var senderSettings = SenderSettings()
     @Published var primarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: "")
+    @Published var weatherSettings = WeatherSettings()
+    @Published var weatherSettingsStatusMessage = "Weather uses Apple location lookup and Open-Meteo forecasts."
+    @Published var weatherSettingsError: String?
     @Published var storagePreferences = StoragePreferences()
     @Published var storageStatus: StorageStatus?
     @Published var storageStatusError: String?
@@ -75,11 +79,13 @@ final class ReadyRoomAppModel: ObservableObject {
     private lazy var obligationsStore = ObligationsYAMLStore(coordinator: storageCoordinator)
     private lazy var sendRegistryStore = SendRegistryStore(coordinator: storageCoordinator)
     private lazy var senderSettingsStore = SenderSettingsStore(coordinator: storageCoordinator)
+    private lazy var weatherSettingsStore = WeatherSettingsStore(coordinator: storageCoordinator)
     private lazy var machineIdentityStore = MachineIdentityStore(coordinator: storageCoordinator)
     private let rulesEngine = ReadyRoomRulesEngine()
     private let parser = PlainEnglishObligationParser()
     private let sendCoordinator = ScheduledSendCoordinator()
     private let mailSender = AppleMailSenderAdapter()
+    private let weatherLocationResolver = AppleLocationSearchResolver()
     private var lastKnownObligationsModifiedAt: Date?
     private var attemptedScheduledSendKeys: Set<String> = []
 
@@ -96,6 +102,8 @@ final class ReadyRoomAppModel: ObservableObject {
             machineIdentifier = try await machineIdentityStore.loadOrCreate()
             senderSettings = try await senderSettingsStore.load()
             primarySenderConfiguration = senderSettings.primary
+            weatherSettings = try await weatherSettingsStore.load()
+            await ensureWeatherSettingsResolvedIfNeeded()
             obligations = try await obligationsStore.load()
             lastKnownObligationsModifiedAt = try await obligationsStore.modificationDate()
             await refreshStorageStatus()
@@ -107,6 +115,7 @@ final class ReadyRoomAppModel: ObservableObject {
 
     func refresh() async {
         statusMessage = quietHours.isActive(at: now) ? "Quiet hours active." : "Refreshing sources..."
+        await syncWeatherSettingsFromStore()
         _ = await syncSharedObligations(force: true)
         let snapshots = await collectSnapshots()
         sourceSnapshots = snapshots
@@ -194,6 +203,11 @@ final class ReadyRoomAppModel: ObservableObject {
         snapshot(for: type)?.placeholderLabel
     }
 
+    func sourceMessage(for type: SourceType) -> String? {
+        let snapshot = snapshot(for: type)
+        return snapshot?.health.message ?? snapshot?.placeholderLabel
+    }
+
     func refreshStorageStatus() async {
         do {
             storagePreferences = try await storageCoordinator.loadStoragePreferences()
@@ -217,6 +231,49 @@ final class ReadyRoomAppModel: ObservableObject {
         } catch {
             storageStatusError = error.localizedDescription
             statusMessage = "Could not update shared folder: \(error.localizedDescription)"
+        }
+    }
+
+    func saveWeatherSettings(locationQuery: String) async {
+        let trimmedQuery = locationQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedQuery.isEmpty == false else {
+            weatherSettingsError = "Enter a ZIP code or city/state before saving weather."
+            weatherSettingsStatusMessage = "Weather location was not changed."
+            return
+        }
+
+        weatherSettingsStatusMessage = "Resolving weather location..."
+        weatherSettingsError = nil
+
+        do {
+            let resolved = try await weatherLocationResolver.resolve(trimmedQuery)
+            let updatedSettings = WeatherSettings(
+                locationQuery: trimmedQuery,
+                resolvedDisplayName: resolved.displayName,
+                latitude: resolved.latitude,
+                longitude: resolved.longitude,
+                lastResolvedAt: .now
+            )
+            try await weatherSettingsStore.save(updatedSettings)
+            weatherSettings = updatedSettings
+            await refresh()
+            weatherSettingsStatusMessage = "Saved weather location for \(updatedSettings.resolvedDisplayName ?? trimmedQuery)."
+        } catch {
+            weatherSettingsError = error.localizedDescription
+            weatherSettingsStatusMessage = "Weather location was not changed."
+        }
+    }
+
+    func refreshWeatherNow() async {
+        weatherSettingsError = nil
+        weatherSettingsStatusMessage = "Refreshing weather..."
+        await refresh()
+        if let message = sourceMessage(for: .weather) {
+            weatherSettingsStatusMessage = message
+        } else if let resolvedDisplayName = weatherSettings.resolvedDisplayName {
+            weatherSettingsStatusMessage = "Weather refreshed for \(resolvedDisplayName)."
+        } else {
+            weatherSettingsStatusMessage = "Weather refreshed."
         }
     }
 
@@ -271,6 +328,82 @@ final class ReadyRoomAppModel: ObservableObject {
         }
     }
 
+    private func syncWeatherSettingsFromStore() async {
+        do {
+            let latestSettings = try await weatherSettingsStore.load()
+            if latestSettings != weatherSettings {
+                weatherSettings = latestSettings
+            }
+            await ensureWeatherSettingsResolvedIfNeeded()
+        } catch {
+            weatherSettingsError = "Could not load weather settings: \(error.localizedDescription)"
+            weatherSettingsStatusMessage = "Weather settings need attention."
+        }
+    }
+
+    private func ensureWeatherSettingsResolvedIfNeeded() async {
+        let trimmedQuery = weatherSettings.trimmedLocationQuery
+        guard trimmedQuery.isEmpty == false else {
+            weatherSettingsError = "Weather location is empty."
+            weatherSettingsStatusMessage = "Enter a ZIP code or city/state to enable live weather."
+            return
+        }
+
+        guard weatherSettings.hasResolvedCoordinates == false else {
+            weatherSettingsError = nil
+            weatherSettingsStatusMessage = "Using \(weatherSettings.resolvedDisplayName ?? trimmedQuery) for weather."
+            return
+        }
+
+        do {
+            let resolved = try await weatherLocationResolver.resolve(trimmedQuery)
+            let updatedSettings = WeatherSettings(
+                locationQuery: trimmedQuery,
+                resolvedDisplayName: resolved.displayName,
+                latitude: resolved.latitude,
+                longitude: resolved.longitude,
+                lastResolvedAt: .now
+            )
+            try await weatherSettingsStore.save(updatedSettings)
+            weatherSettings = updatedSettings
+            weatherSettingsError = nil
+            weatherSettingsStatusMessage = "Resolved weather location to \(updatedSettings.resolvedDisplayName ?? trimmedQuery)."
+        } catch {
+            weatherSettingsError = error.localizedDescription
+            weatherSettingsStatusMessage = "Weather location could not be resolved."
+        }
+    }
+
+    private func weatherSnapshot() async -> SourceSnapshot {
+        let trimmedQuery = weatherSettings.trimmedLocationQuery
+        guard trimmedQuery.isEmpty == false else {
+            return WeatherSourceSnapshotFactory.unconfigured(
+                message: "Set a ZIP code or city/state in Settings to enable live weather.",
+                fetchedAt: now
+            )
+        }
+
+        guard let latitude = weatherSettings.latitude, let longitude = weatherSettings.longitude else {
+            return WeatherSourceSnapshotFactory.unconfigured(
+                message: "Weather location \"\(trimmedQuery)\" is saved but not resolved yet.",
+                fetchedAt: now
+            )
+        }
+
+        let connector = OpenMeteoWeatherConnector(
+            configuration: OpenMeteoConfiguration(latitude: latitude, longitude: longitude)
+        )
+
+        do {
+            return try await connector.refresh()
+        } catch {
+            return WeatherSourceSnapshotFactory.unavailable(
+                message: "Weather refresh failed for \(weatherSettings.resolvedDisplayName ?? trimmedQuery): \(error.localizedDescription)",
+                fetchedAt: now
+            )
+        }
+    }
+
     func moveCard(_ kind: DashboardCardKind, direction: Int) {
         guard let index = cardLayout.cardOrder.firstIndex(of: kind) else {
             return
@@ -318,6 +451,7 @@ final class ReadyRoomAppModel: ObservableObject {
 
     private func collectSnapshots() async -> [SourceSnapshot] {
         var snapshots = DevelopmentData.sampleSnapshots(referenceDate: now)
+        snapshots.append(await weatherSnapshot())
 
         let calendarConnector = EventKitCalendarConnector()
         if let liveCalendar = try? await calendarConnector.refresh(),
@@ -508,6 +642,7 @@ final class ReadyRoomAppModel: ObservableObject {
     }
 
     private func refreshBriefingsForScheduledSend() async {
+        await syncWeatherSettingsFromStore()
         _ = await syncSharedObligations(force: true)
         let snapshots = await collectSnapshots()
         sourceSnapshots = snapshots
@@ -591,15 +726,6 @@ private enum DevelopmentData {
             calendarEvents: [johnWork, amyMeeting, schoolPickup]
         )
 
-        let weatherSnapshot = SourceSnapshot(
-            source: SourceDescriptor(id: "sample-weather", displayName: "Weather", type: .weather),
-            fetchedAt: referenceDate,
-            lastGoodFetchAt: referenceDate,
-            health: SourceHealth(status: .healthy, lastSuccessAt: referenceDate, freshnessBudget: 3600),
-            placeholderLabel: "Sample weather data",
-            weather: WeatherSnapshot(summary: "Sunny", currentTemperatureF: 48, highF: 61, lowF: 42)
-        )
-
         let newsSnapshot = SourceSnapshot(
             source: SourceDescriptor(id: "sample-news", displayName: "News", type: .news),
             fetchedAt: referenceDate,
@@ -624,7 +750,7 @@ private enum DevelopmentData {
             ]
         )
 
-        return [calendarSnapshot, weatherSnapshot, newsSnapshot, mediaSnapshot]
+        return [calendarSnapshot, newsSnapshot, mediaSnapshot]
     }
 }
 

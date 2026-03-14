@@ -1,4 +1,5 @@
 import Foundation
+import MapKit
 import ReadyRoomCore
 
 public struct OpenMeteoConfiguration: Sendable {
@@ -11,8 +12,153 @@ public struct OpenMeteoConfiguration: Sendable {
     }
 }
 
+public struct ResolvedWeatherLocation: Sendable, Hashable {
+    public var displayName: String
+    public var latitude: Double
+    public var longitude: Double
+
+    public init(displayName: String, latitude: Double, longitude: Double) {
+        self.displayName = displayName
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+}
+
+public struct AppleLocationSearchResolver: Sendable {
+    public init() {}
+
+    public func resolve(_ query: String) async throws -> ResolvedWeatherLocation {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedQuery.isEmpty == false else {
+            throw NSError(
+                domain: "ReadyRoomWeatherLocation",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Enter a ZIP code or city/state to resolve weather."]
+            )
+        }
+
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = Self.normalizedQuery(for: trimmedQuery)
+        request.resultTypes = .address
+
+        let response = try await MKLocalSearch(request: request).start()
+        guard let item = response.mapItems.first(where: { CLLocationCoordinate2DIsValid($0.placemark.coordinate) }) else {
+            throw NSError(
+                domain: "ReadyRoomWeatherLocation",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "No location matched \"\(trimmedQuery)\"."]
+            )
+        }
+
+        let coordinate = item.placemark.coordinate
+        return ResolvedWeatherLocation(
+            displayName: Self.displayName(for: item.placemark, fallback: trimmedQuery),
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )
+    }
+
+    private static func normalizedQuery(for query: String) -> String {
+        if query.range(of: #"^\d{5}$"#, options: .regularExpression) != nil {
+            return "\(query), USA"
+        }
+        return query
+    }
+
+    private static func displayName(for placemark: MKPlacemark, fallback: String) -> String {
+        let locality = placemark.locality ?? placemark.subAdministrativeArea
+        let region = placemark.administrativeArea
+        let country = placemark.countryCode
+        let core: [String] = [locality, region].compactMap { value in
+            guard let value, value.isEmpty == false else {
+                return nil
+            }
+            return value
+        }
+        if core.isEmpty == false {
+            if let country, country != "US" {
+                return (core + [country]).joined(separator: ", ")
+            }
+            return core.joined(separator: ", ")
+        }
+        return placemark.title ?? placemark.name ?? fallback
+    }
+}
+
+public enum WeatherSourceSnapshotFactory {
+    public static let source = SourceDescriptor(id: "open-meteo", displayName: "Weather", type: .weather)
+
+    public static func unconfigured(message: String, fetchedAt: Date = .now) -> SourceSnapshot {
+        SourceSnapshot(
+            source: source,
+            fetchedAt: fetchedAt,
+            health: SourceHealth(status: .unconfigured, message: message, freshnessBudget: 3600)
+        )
+    }
+
+    public static func unavailable(message: String, fetchedAt: Date = .now) -> SourceSnapshot {
+        SourceSnapshot(
+            source: source,
+            fetchedAt: fetchedAt,
+            health: SourceHealth(status: .unavailable, message: message, freshnessBudget: 3600)
+        )
+    }
+}
+
+public enum OpenMeteoWeatherCodeMapper {
+    public static func summary(for weatherCode: Int) -> String {
+        switch weatherCode {
+        case 0:
+            "Clear"
+        case 1:
+            "Mostly clear"
+        case 2:
+            "Partly cloudy"
+        case 3:
+            "Overcast"
+        case 45, 48:
+            "Foggy"
+        case 51...57:
+            "Drizzle"
+        case 61...67, 80...82:
+            "Rainy"
+        case 71...77, 85, 86:
+            "Snow"
+        case 95...99:
+            "Stormy"
+        default:
+            "Variable"
+        }
+    }
+
+    public static func symbolName(for weatherCode: Int) -> String {
+        switch weatherCode {
+        case 0:
+            "sun.max.fill"
+        case 1:
+            "sun.max.fill"
+        case 2:
+            "cloud.sun.fill"
+        case 3:
+            "cloud.fill"
+        case 45, 48:
+            "cloud.fog.fill"
+        case 51...57:
+            "cloud.drizzle.fill"
+        case 61...67, 80...82:
+            "cloud.rain.fill"
+        case 71...77, 85, 86:
+            "cloud.snow.fill"
+        case 95...99:
+            "cloud.bolt.rain.fill"
+        default:
+            "cloud.fill"
+        }
+    }
+}
+
 public actor OpenMeteoWeatherConnector: SourceConnector {
-    public let source = SourceDescriptor(id: "open-meteo", displayName: "Weather", type: .weather)
+    public let source = WeatherSourceSnapshotFactory.source
     private let configuration: OpenMeteoConfiguration
     private let session: URLSession
 
@@ -27,6 +173,7 @@ public actor OpenMeteoWeatherConnector: SourceConnector {
         let payload = try JSONDecoder().decode(OpenMeteoPayload.self, from: data)
         let weather = WeatherSnapshot(
             summary: payload.current.summary,
+            symbolName: payload.current.symbolName,
             currentTemperatureF: payload.current.temperature2M,
             highF: payload.daily.temperature2MMax.first ?? payload.current.temperature2M,
             lowF: payload.daily.temperature2MMin.first ?? payload.current.temperature2M
@@ -52,15 +199,11 @@ private struct OpenMeteoPayload: Decodable {
         }
 
         var summary: String {
-            switch weatherCode {
-            case 0: "Clear"
-            case 1...3: "Partly cloudy"
-            case 45, 48: "Foggy"
-            case 51...67: "Rainy"
-            case 71...77: "Snow"
-            case 80...99: "Stormy"
-            default: "Variable"
-            }
+            OpenMeteoWeatherCodeMapper.summary(for: weatherCode)
+        }
+
+        var symbolName: String {
+            OpenMeteoWeatherCodeMapper.symbolName(for: weatherCode)
         }
     }
 
@@ -194,4 +337,3 @@ private final class RSSFeedParser: NSObject, XMLParserDelegate {
         return nil
     }
 }
-
