@@ -162,4 +162,19 @@ struct ReadyRoomFoundationTests {
         #expect(updated.explanation == "I understood this as a monthly payment reminder.")
         #expect(updated.reminderLeadDays == [10, 3])
     }
+
+    @Test
+    func sourceSnapshotTracksPlaceholderState() {
+        let placeholderSnapshot = SourceSnapshot(
+            source: SourceDescriptor(id: "sample-weather", displayName: "Weather", type: .weather),
+            placeholderLabel: "Sample weather data"
+        )
+        let liveSnapshot = SourceSnapshot(
+            source: SourceDescriptor(id: "open-meteo", displayName: "Weather", type: .weather)
+        )
+
+        #expect(placeholderSnapshot.isPlaceholder)
+        #expect(placeholderSnapshot.placeholderLabel == "Sample weather data")
+        #expect(liveSnapshot.isPlaceholder == false)
+    }
 }

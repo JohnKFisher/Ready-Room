@@ -97,6 +97,7 @@ public struct SourceSnapshot: Codable, Sendable, Hashable {
     public var fetchedAt: Date
     public var lastGoodFetchAt: Date?
     public var health: SourceHealth
+    public var placeholderLabel: String?
     public var calendarEvents: [RawCalendarEvent]
     public var obligations: [ObligationRecord]
     public var weather: WeatherSnapshot?
@@ -108,6 +109,7 @@ public struct SourceSnapshot: Codable, Sendable, Hashable {
         fetchedAt: Date = .now,
         lastGoodFetchAt: Date? = nil,
         health: SourceHealth = SourceHealth(),
+        placeholderLabel: String? = nil,
         calendarEvents: [RawCalendarEvent] = [],
         obligations: [ObligationRecord] = [],
         weather: WeatherSnapshot? = nil,
@@ -118,11 +120,16 @@ public struct SourceSnapshot: Codable, Sendable, Hashable {
         self.fetchedAt = fetchedAt
         self.lastGoodFetchAt = lastGoodFetchAt
         self.health = health
+        self.placeholderLabel = placeholderLabel
         self.calendarEvents = calendarEvents
         self.obligations = obligations
         self.weather = weather
         self.headlines = headlines
         self.mediaItems = mediaItems
+    }
+
+    public var isPlaceholder: Bool {
+        placeholderLabel != nil
     }
 }
 
@@ -822,4 +829,3 @@ public protocol SenderAdapter: Sendable {
     var displayName: String { get }
     func send(artifact: BriefingArtifact, mode: SendMode, machineIdentifier: String) async throws -> SendExecutionResult
 }
-

@@ -174,6 +174,14 @@ final class ReadyRoomAppModel: ObservableObject {
         return obligations.contains(where: { $0.id == editor.id })
     }
 
+    func snapshot(for type: SourceType) -> SourceSnapshot? {
+        sourceSnapshots.first(where: { $0.source.type == type })
+    }
+
+    func placeholderLabel(for type: SourceType) -> String? {
+        snapshot(for: type)?.placeholderLabel
+    }
+
     func moveCard(_ kind: DashboardCardKind, direction: Int) {
         guard let index = cardLayout.cardOrder.firstIndex(of: kind) else {
             return
@@ -439,6 +447,7 @@ private enum DevelopmentData {
             fetchedAt: referenceDate,
             lastGoodFetchAt: referenceDate,
             health: SourceHealth(status: .healthy, lastSuccessAt: referenceDate, freshnessBudget: 900),
+            placeholderLabel: "Sample calendar data",
             calendarEvents: [johnWork, amyMeeting, schoolPickup]
         )
 
@@ -447,6 +456,7 @@ private enum DevelopmentData {
             fetchedAt: referenceDate,
             lastGoodFetchAt: referenceDate,
             health: SourceHealth(status: .healthy, lastSuccessAt: referenceDate, freshnessBudget: 3600),
+            placeholderLabel: "Sample weather data",
             weather: WeatherSnapshot(summary: "Sunny", currentTemperatureF: 48, highF: 61, lowF: 42)
         )
 
@@ -455,6 +465,7 @@ private enum DevelopmentData {
             fetchedAt: referenceDate,
             lastGoodFetchAt: referenceDate,
             health: SourceHealth(status: .healthy, lastSuccessAt: referenceDate, freshnessBudget: 7200),
+            placeholderLabel: "Sample news headlines",
             headlines: [
                 NewsHeadline(title: "Markets open mixed as investors watch inflation data", sourceName: "AP", publishedAt: referenceDate, weight: 1.0),
                 NewsHeadline(title: "New family movie lands on streaming this weekend", sourceName: "Entertainment Weekly", publishedAt: referenceDate, weight: 0.8)
@@ -466,6 +477,7 @@ private enum DevelopmentData {
             fetchedAt: referenceDate,
             lastGoodFetchAt: referenceDate,
             health: SourceHealth(status: .healthy, lastSuccessAt: referenceDate, freshnessBudget: 1800),
+            placeholderLabel: "Sample Plex/media activity",
             mediaItems: [
                 MediaActivity(kind: .nowPlaying, title: "Bluey", user: "Ellie", progress: 0.35, device: "Living Room TV"),
                 MediaActivity(kind: .newAddition, title: "The Wild Robot", subtitle: "Recently added to Plex")

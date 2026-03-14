@@ -32,6 +32,7 @@ Implemented in this foundation pass:
 - sender abstraction, scheduled-send coordination logic, and an Apple Mail sender implementation path
 - SwiftUI app shell for dashboard, preview, obligations, settings, and debug flows
 - obligations editor now supports post-parse field edits, inline explanation editing, and click-to-edit for saved items
+- sample placeholder sources are explicitly labeled in the dashboard and debug source-health views until live connectors replace them
 
 Still open after this pass:
 

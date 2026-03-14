@@ -80,8 +80,18 @@ struct DashboardView: View {
                     Text(model.now.formattedMonthDayWeekday())
                         .font(.title3)
                         .foregroundStyle(.secondary)
-                    Text(model.weather.map { "\($0.summary), \(Int($0.currentTemperatureF))F" } ?? "Weather unavailable")
-                        .font(.headline)
+                    HStack(spacing: 8) {
+                        Text(model.weather.map { "\($0.summary), \(Int($0.currentTemperatureF))F" } ?? "Weather unavailable")
+                            .font(.headline)
+                        if model.placeholderLabel(for: .weather) != nil {
+                            PlaceholderBadge(text: "Placeholder")
+                        }
+                    }
+                    if let placeholderLabel = model.placeholderLabel(for: .weather) {
+                        Text(placeholderLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 6) {
@@ -136,8 +146,18 @@ struct DashboardView: View {
     private var timelineColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Timeline")
-                    .font(.headline)
+                HStack(spacing: 8) {
+                    Text("Timeline")
+                        .font(.headline)
+                    if model.placeholderLabel(for: .calendar) != nil {
+                        PlaceholderBadge(text: "Placeholder")
+                    }
+                }
+                if let placeholderLabel = model.placeholderLabel(for: .calendar) {
+                    Text(placeholderLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 ForEach(groupedTimeline) { group in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(group.title)
@@ -175,6 +195,7 @@ struct DashboardView: View {
             ForEach(model.cardLayout.cardOrder, id: \.self) { card in
                 SideCard(
                     title: cardTitle(card),
+                    placeholderText: placeholderText(for: card),
                     moveUp: { model.moveCard(card, direction: -1) },
                     moveDown: { model.moveCard(card, direction: 1) }
                 ) {
@@ -226,6 +247,19 @@ struct DashboardView: View {
         case .weather: "Weather"
         case .news: "News"
         case .media: "Media"
+        }
+    }
+
+    private func placeholderText(for kind: DashboardCardKind) -> String? {
+        switch kind {
+        case .dueSoon:
+            nil
+        case .weather:
+            model.placeholderLabel(for: .weather)
+        case .news:
+            model.placeholderLabel(for: .news)
+        case .media:
+            model.placeholderLabel(for: .media)
         }
     }
 
@@ -297,6 +331,7 @@ private struct TimelineItemView: View {
 
 private struct SideCard<Content: View>: View {
     let title: String
+    let placeholderText: String?
     let moveUp: () -> Void
     let moveDown: () -> Void
     @ViewBuilder let content: Content
@@ -306,11 +341,19 @@ private struct SideCard<Content: View>: View {
             HStack {
                 Text(title)
                     .font(.headline)
+                if placeholderText != nil {
+                    PlaceholderBadge(text: "Placeholder")
+                }
                 Spacer()
                 Button(action: moveUp) { Image(systemName: "arrow.up") }
                     .buttonStyle(.borderless)
                 Button(action: moveDown) { Image(systemName: "arrow.down") }
                     .buttonStyle(.borderless)
+            }
+            if let placeholderText {
+                Text(placeholderText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             content
         }
@@ -320,6 +363,19 @@ private struct SideCard<Content: View>: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
         }
+    }
+}
+
+private struct PlaceholderBadge: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(ReadyRoomPalette.badgeText)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(ReadyRoomPalette.badgeFill, in: Capsule())
     }
 }
 

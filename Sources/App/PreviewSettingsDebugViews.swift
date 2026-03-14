@@ -300,7 +300,33 @@ struct DebugView: View {
                     Text("Source Health")
                         .font(.headline)
                     ForEach(model.sourceSnapshots, id: \.source.id) { snapshot in
-                        Text("\(snapshot.source.displayName): \(snapshot.health.resolvedStatus(at: model.now).rawValue)")
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Text(snapshot.source.displayName)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(snapshot.health.resolvedStatus(at: model.now).rawValue.capitalized)
+                                    .foregroundStyle(.secondary)
+                                if snapshot.isPlaceholder {
+                                    Text("Placeholder")
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.accentColor.opacity(0.14), in: Capsule())
+                                }
+                            }
+                            if let placeholderLabel = snapshot.placeholderLabel {
+                                Text(placeholderLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let message = snapshot.health.message, !message.isEmpty {
+                                Text(message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 2)
                     }
                 }
                 .padding()
