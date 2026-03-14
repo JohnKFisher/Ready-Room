@@ -6,13 +6,32 @@ import ReadyRoomCore
 struct DashboardView: View {
     @ObservedObject var model: ReadyRoomAppModel
 
-    private var groupedTimeline: [(String, [NormalizedItem])] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMM d"
+    private var groupedTimeline: [TimelineDayGroup] {
+        let calendar = Calendar.readyRoomGregorian
         let grouped = Dictionary(grouping: model.normalizedItems) { item in
-            formatter.string(from: item.startDate ?? model.now)
+            calendar.startOfDay(for: item.startDate ?? model.now)
         }
-        return grouped.keys.sorted().map { ($0, grouped[$0] ?? []) }
+        return grouped.keys.sorted().map { date in
+            let items = grouped[date] ?? []
+            let sortedItems = items.sorted { lhs, rhs in
+                switch (lhs.startDate, rhs.startDate) {
+                case let (lhsDate?, rhsDate?):
+                    return lhsDate < rhsDate
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    return lhs.title < rhs.title
+                }
+            }
+            return TimelineDayGroup(
+                date: date,
+                title: dayTitle(for: date, calendar: calendar),
+                allDayItems: sortedItems.filter(\.isAllDay),
+                scheduledItems: sortedItems.filter { !$0.isAllDay }
+            )
+        }
     }
 
     var body: some View {
@@ -73,9 +92,18 @@ struct DashboardView: View {
                     Text(AppRuntimeMetadata.displayString)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
-                    Toggle("Dashboard Mode", isOn: $model.dashboardModeEnabled)
-                        .toggleStyle(.switch)
-                        .labelsHidden()
+                    HStack(spacing: 10) {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Minimal Chrome")
+                                .font(.caption.weight(.semibold))
+                            Text("Hides the title bar for a cleaner wall display")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Toggle("Minimal Window Chrome", isOn: $model.dashboardModeEnabled)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
                 }
             }
 
@@ -107,30 +135,26 @@ struct DashboardView: View {
 
     private var timelineColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if !model.normalizedItems.filter(\.isAllDay).isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("All Day")
-                        .font(.headline)
-                    ForEach(model.normalizedItems.filter(\.isAllDay)) { item in
-                        TimelineItemView(item: item)
-                    }
-                }
-                .padding()
-                .background(ReadyRoomPalette.groupSurface, in: RoundedRectangle(cornerRadius: 16))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
-                }
-            }
-
             VStack(alignment: .leading, spacing: 12) {
                 Text("Timeline")
                     .font(.headline)
-                ForEach(groupedTimeline, id: \.0) { day, items in
+                ForEach(groupedTimeline) { group in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(day)
-                            .font(.title3.weight(day.contains("Today") ? .bold : .semibold))
-                        ForEach(items.filter { !$0.isAllDay }) { item in
+                        Text(group.title)
+                            .font(.title3.weight(group.isToday ? .bold : .semibold))
+
+                        if !group.allDayItems.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("All Day")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ForEach(group.allDayItems) { item in
+                                    TimelineItemView(item: item)
+                                }
+                            }
+                        }
+
+                        ForEach(group.scheduledItems) { item in
                             TimelineItemView(item: item)
                         }
                     }
@@ -204,6 +228,29 @@ struct DashboardView: View {
         case .media: "Media"
         }
     }
+
+    private func dayTitle(for date: Date, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMM d"
+
+        if calendar.isDateInToday(date) {
+            return "Today — \(formatter.string(from: date))"
+        }
+        if calendar.isDateInTomorrow(date) {
+            return "Tomorrow — \(formatter.string(from: date))"
+        }
+        return formatter.string(from: date)
+    }
+}
+
+private struct TimelineDayGroup: Identifiable {
+    let date: Date
+    let title: String
+    let allDayItems: [NormalizedItem]
+    let scheduledItems: [NormalizedItem]
+
+    var id: Date { date }
+    var isToday: Bool { Calendar.readyRoomGregorian.isDateInToday(date) }
 }
 
 private struct TimelineItemView: View {
