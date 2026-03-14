@@ -39,6 +39,7 @@ Implemented in this foundation pass:
 - the timeline remains permissive for calendar items even when their dashboard include-flag is false, preventing a regression where the main timeline appeared nearly empty
 - the Settings sidebar now uses explicit tagged sidebar rows so subsection selection works reliably on macOS
 - the Storage/Sync screen now distinguishes between iCloud not being active for the current build/Mac and files simply not having been created yet
+- obligation occurrences now use the same carry-yesterday-until-3:00-AM day boundary as the timeline, so late-night recurring items stay attached to the expected day group
 
 Still open after this pass:
 

@@ -31,3 +31,15 @@ public extension Date {
     }
 }
 
+public enum ReadyRoomTimePolicy {
+    public static func displayedDayStart(
+        for now: Date,
+        calendar: Calendar = .readyRoomGregorian,
+        carryPreviousDayUntilHour hour: Int = 3
+    ) -> Date {
+        let startOfToday = now.startOfDay(in: calendar)
+        return calendar.component(.hour, from: now) < hour
+            ? startOfToday.adding(days: -1, calendar: calendar)
+            : startOfToday
+    }
+}

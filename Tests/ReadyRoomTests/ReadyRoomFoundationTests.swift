@@ -62,6 +62,47 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func recurringObligationDueYesterdayStillShowsBeforeThreeAM() {
+        let engine = ReadyRoomRulesEngine()
+        let referenceDate = Calendar.readyRoomGregorian.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 1, minute: 15))!
+        let obligation = ObligationRecord(
+            title: "Disney card due",
+            schedule: ObligationSchedule(kind: .monthly, dayOfMonth: 13),
+            reminderLeadDays: [7, 3]
+        )
+
+        let items = engine.dueSoonObligations(
+            [obligation],
+            source: SourceDescriptor(id: "obligations", displayName: "Obligations", type: .obligation),
+            health: .healthy,
+            referenceDate: referenceDate
+        )
+
+        #expect(items.count == 1)
+        #expect(items[0].startDate == Calendar.readyRoomGregorian.date(from: DateComponents(year: 2026, month: 3, day: 13)))
+    }
+
+    @Test
+    func recurringObligationDueYesterdayRollsOutAfterThreeAM() {
+        let engine = ReadyRoomRulesEngine()
+        let referenceDate = Calendar.readyRoomGregorian.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 3, minute: 5))!
+        let obligation = ObligationRecord(
+            title: "Disney card due",
+            schedule: ObligationSchedule(kind: .monthly, dayOfMonth: 13),
+            reminderLeadDays: [7, 3]
+        )
+
+        let items = engine.dueSoonObligations(
+            [obligation],
+            source: SourceDescriptor(id: "obligations", displayName: "Obligations", type: .obligation),
+            health: .healthy,
+            referenceDate: referenceDate
+        )
+
+        #expect(items.isEmpty)
+    }
+
+    @Test
     func obligationParserHandlesMonthlySentence() {
         let parser = PlainEnglishObligationParser()
         let parsed = parser.parse("Mortgage due every month on the 15th, remind me 7 and 3 days before")

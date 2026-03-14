@@ -505,9 +505,7 @@ enum DashboardTimelinePolicy {
     }
 
     static func earliestVisibleDay(for now: Date, calendar: Calendar = .readyRoomGregorian) -> Date {
-        let startOfToday = now.startOfDay(in: calendar)
-        let hour = calendar.component(.hour, from: now)
-        return hour < 3 ? startOfToday.adding(days: -1, calendar: calendar) : startOfToday
+        ReadyRoomTimePolicy.displayedDayStart(for: now, calendar: calendar)
     }
 
     static func includes(_ item: NormalizedItem, now: Date, calendar: Calendar = .readyRoomGregorian) -> Bool {

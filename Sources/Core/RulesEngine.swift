@@ -43,11 +43,14 @@ public struct ReadyRoomRulesEngine: Sendable {
         referenceDate: Date = .now,
         previousVisibleIDs: Set<String> = []
     ) -> [NormalizedItem] {
-        obligations.compactMap { obligation in
-            guard let nextOccurrence = nextOccurrence(for: obligation, after: referenceDate) else {
+        let calendar = Calendar.readyRoomGregorian
+        let visibleDayStart = ReadyRoomTimePolicy.displayedDayStart(for: referenceDate, calendar: calendar)
+
+        let items: [NormalizedItem] = obligations.compactMap { obligation -> NormalizedItem? in
+            guard let nextOccurrence = nextOccurrence(for: obligation, after: visibleDayStart) else {
                 return nil
             }
-            let dueInDays = Calendar.readyRoomGregorian.dateComponents([.day], from: referenceDate.startOfDay(), to: nextOccurrence.startOfDay()).day ?? Int.max
+            let dueInDays = calendar.dateComponents([.day], from: visibleDayStart, to: nextOccurrence.startOfDay(in: calendar)).day ?? Int.max
             let earliestLead = max(7, obligation.reminderLeadDays.max() ?? 0)
             guard dueInDays <= earliestLead else {
                 return nil
@@ -95,7 +98,7 @@ public struct ReadyRoomRulesEngine: Sendable {
                 metadata: ["kind": obligation.schedule.kind.rawValue]
             )
         }
-        .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+        return items.sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }
 
     public func detectConflicts(in items: [NormalizedItem]) -> [ConflictMarker] {
@@ -143,7 +146,10 @@ public struct ReadyRoomRulesEngine: Sendable {
         let calendar = Calendar.readyRoomGregorian
         switch obligation.schedule.kind {
         case .oneTime:
-            return obligation.schedule.dueDate
+            guard let dueDate = obligation.schedule.dueDate, dueDate.startOfDay(in: calendar) >= referenceDate.startOfDay(in: calendar) else {
+                return nil
+            }
+            return dueDate
         case .weekly:
             let weekdays = obligation.schedule.weekdays.isEmpty ? [calendar.component(.weekday, from: referenceDate)] : obligation.schedule.weekdays
             for dayOffset in 0...28 {
@@ -187,7 +193,10 @@ public struct ReadyRoomRulesEngine: Sendable {
             }
             return nil
         case .custom:
-            return obligation.schedule.dueDate
+            guard let dueDate = obligation.schedule.dueDate, dueDate.startOfDay(in: calendar) >= referenceDate.startOfDay(in: calendar) else {
+                return nil
+            }
+            return dueDate
         }
     }
 
