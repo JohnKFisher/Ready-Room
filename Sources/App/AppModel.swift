@@ -77,6 +77,7 @@ final class ReadyRoomAppModel: ObservableObject {
     private let parser = PlainEnglishObligationParser()
     private let sendCoordinator = ScheduledSendCoordinator()
     private let mailSender = AppleMailSenderAdapter()
+    private var lastKnownObligationsModifiedAt: Date?
 
     init() {
         Task {
@@ -89,6 +90,7 @@ final class ReadyRoomAppModel: ObservableObject {
             cardLayout = try await layoutStore.load()
             setupProgress = try await setupStore.load()
             obligations = try await obligationsStore.load()
+            lastKnownObligationsModifiedAt = try await obligationsStore.modificationDate()
             machineIdentifier = try await machineIdentityStore.loadOrCreate()
             primarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: machineIdentifier)
             await refreshStorageStatus()
@@ -100,6 +102,7 @@ final class ReadyRoomAppModel: ObservableObject {
 
     func refresh() async {
         statusMessage = quietHours.isActive(at: now) ? "Quiet hours active." : "Refreshing sources..."
+        _ = await syncSharedObligations(force: true)
         let snapshots = await collectSnapshots()
         sourceSnapshots = snapshots
         await applySnapshots(snapshots)
@@ -196,6 +199,29 @@ final class ReadyRoomAppModel: ObservableObject {
         }
     }
 
+    private func syncSharedObligations(force: Bool) async -> Bool {
+        do {
+            let modificationDate = try await obligationsStore.modificationDate()
+            guard SharedObligationSyncGate.shouldReload(
+                lastSeen: lastKnownObligationsModifiedAt,
+                current: modificationDate,
+                force: force
+            ) else {
+                return false
+            }
+
+            let latestObligations = try await obligationsStore.load()
+            let changed = latestObligations != obligations || modificationDate != lastKnownObligationsModifiedAt
+            obligations = latestObligations
+            lastKnownObligationsModifiedAt = modificationDate
+            await refreshStorageStatus()
+            return changed
+        } catch {
+            storageStatusError = error.localizedDescription
+            return false
+        }
+    }
+
     func moveCard(_ kind: DashboardCardKind, direction: Int) {
         guard let index = cardLayout.cardOrder.firstIndex(of: kind) else {
             return
@@ -232,6 +258,11 @@ final class ReadyRoomAppModel: ObservableObject {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(60))
             now = Date()
+            if await syncSharedObligations(force: false) {
+                statusMessage = "Shared obligations updated."
+                await refresh()
+                continue
+            }
             await evaluateScheduledSendsIfNeeded()
         }
     }
@@ -499,5 +530,14 @@ private enum DevelopmentData {
         )
 
         return [calendarSnapshot, weatherSnapshot, newsSnapshot, mediaSnapshot]
+    }
+}
+
+enum SharedObligationSyncGate {
+    static func shouldReload(lastSeen: Date?, current: Date?, force: Bool) -> Bool {
+        guard force == false else {
+            return true
+        }
+        return lastSeen != current
     }
 }

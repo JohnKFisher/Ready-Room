@@ -21,6 +21,10 @@ public actor ObligationsYAMLStore {
         let yaml = try YAMLEncoder().encode(obligations)
         try await coordinator.saveText(yaml, relativePath: path, scope: .shared)
     }
+
+    public func modificationDate() async throws -> Date? {
+        try await coordinator.modificationDate(relativePath: path, scope: .shared)
+    }
 }
 
 public struct PlainEnglishObligationParser: Sendable {

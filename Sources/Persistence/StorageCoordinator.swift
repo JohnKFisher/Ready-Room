@@ -181,15 +181,18 @@ public actor ReadyRoomStorageCoordinator {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
+    public func modificationDate(relativePath: String, scope: StorageScope) throws -> Date? {
+        let url = try url(for: relativePath, scope: scope)
+        guard fileManager.fileExists(atPath: url.path) else {
+            return nil
+        }
+        return try fileManager.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+    }
+
     private func fileStatus(label: String, relativePath: String, scope: StorageScope) throws -> StorageFileStatus {
         let url = try url(for: relativePath, scope: scope)
         let exists = fileManager.fileExists(atPath: url.path)
-        let modifiedAt: Date?
-        if exists {
-            modifiedAt = try fileManager.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
-        } else {
-            modifiedAt = nil
-        }
+        let modifiedAt = try modificationDate(relativePath: relativePath, scope: scope)
         return StorageFileStatus(
             label: label,
             relativePath: relativePath,

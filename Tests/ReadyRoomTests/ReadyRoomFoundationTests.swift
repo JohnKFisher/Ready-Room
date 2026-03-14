@@ -189,4 +189,14 @@ struct ReadyRoomFoundationTests {
         #expect(roots.syncsAcrossMacs == false)
         #expect(roots.effectiveSharedRoot.path == "/tmp/ReadyRoom/SharedFallback")
     }
+
+    @Test
+    func sharedObligationSyncGateReloadsWhenSharedFileChanges() {
+        let earlier = Calendar.readyRoomGregorian.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 0, minute: 0))!
+        let later = earlier.addingTimeInterval(60)
+
+        #expect(SharedObligationSyncGate.shouldReload(lastSeen: earlier, current: later, force: false))
+        #expect(SharedObligationSyncGate.shouldReload(lastSeen: earlier, current: earlier, force: false) == false)
+        #expect(SharedObligationSyncGate.shouldReload(lastSeen: nil, current: nil, force: true))
+    }
 }
