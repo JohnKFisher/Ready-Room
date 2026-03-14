@@ -255,6 +255,22 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func dashboardTimelinePolicyStillShowsCalendarItemsWhenDashboardFlagIsFalse() {
+        let item = NormalizedItem(
+            id: "calendar:hidden-flag",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "hidden-flag",
+            sourceType: .calendar,
+            title: "Work meeting",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(1800),
+            inclusion: InclusionFlags(dashboard: false, johnBriefing: true, amyBriefing: false)
+        )
+
+        #expect(DashboardTimelinePolicy.shouldDisplay(item))
+    }
+
+    @Test
     func storageRootsUseLocalFallbackWhenICloudRootIsUnavailable() {
         let roots = StorageRoots(
             localRoot: URL(filePath: "/tmp/ReadyRoom"),

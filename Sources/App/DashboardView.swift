@@ -11,7 +11,7 @@ struct DashboardView: View {
             model.normalizedItems.contains(where: { $0.id == obligation.id }) == false
         }
         return merged.filter { item in
-            item.inclusion.dashboard &&
+            DashboardTimelinePolicy.shouldDisplay(item) &&
             DashboardTimelinePolicy.includes(item, now: model.now)
         }
     }
@@ -344,7 +344,18 @@ private struct TimelineItemView: View {
         if isCompleted {
             return "Complete"
         }
-        return item.changeState == .unchanged ? nil : item.changeState.rawValue.capitalized
+        switch item.changeState {
+        case .unchanged:
+            return nil
+        case .new:
+            return "New"
+        case .changed:
+            return "Changed"
+        case .cancelled:
+            return "Cancelled"
+        case .enteredReminderWindow:
+            return "Due Soon"
+        }
     }
 
     var body: some View {
@@ -484,6 +495,15 @@ private struct TimelineStatusBadge: View {
 }
 
 enum DashboardTimelinePolicy {
+    static func shouldDisplay(_ item: NormalizedItem) -> Bool {
+        switch item.sourceType {
+        case .calendar:
+            true
+        default:
+            item.inclusion.dashboard
+        }
+    }
+
     static func earliestVisibleDay(for now: Date, calendar: Calendar = .readyRoomGregorian) -> Date {
         let startOfToday = now.startOfDay(in: calendar)
         let hour = calendar.component(.hour, from: now)
