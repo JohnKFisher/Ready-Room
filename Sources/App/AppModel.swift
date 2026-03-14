@@ -58,6 +58,7 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var dashboardModeEnabled = false
     @Published var preferredMode: NarrativeGenerationMode = .foundationModels
     @Published var machineIdentifier = ""
+    @Published var senderSettings = SenderSettings()
     @Published var primarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: "")
     @Published var storagePreferences = StoragePreferences()
     @Published var storageStatus: StorageStatus?
@@ -73,12 +74,14 @@ final class ReadyRoomAppModel: ObservableObject {
     private lazy var archiveStore = ArchiveStore(coordinator: storageCoordinator)
     private lazy var obligationsStore = ObligationsYAMLStore(coordinator: storageCoordinator)
     private lazy var sendRegistryStore = SendRegistryStore(coordinator: storageCoordinator)
+    private lazy var senderSettingsStore = SenderSettingsStore(coordinator: storageCoordinator)
     private lazy var machineIdentityStore = MachineIdentityStore(coordinator: storageCoordinator)
     private let rulesEngine = ReadyRoomRulesEngine()
     private let parser = PlainEnglishObligationParser()
     private let sendCoordinator = ScheduledSendCoordinator()
     private let mailSender = AppleMailSenderAdapter()
     private var lastKnownObligationsModifiedAt: Date?
+    private var attemptedScheduledSendKeys: Set<String> = []
 
     init() {
         Task {
@@ -90,10 +93,11 @@ final class ReadyRoomAppModel: ObservableObject {
         do {
             cardLayout = try await layoutStore.load()
             setupProgress = try await setupStore.load()
+            machineIdentifier = try await machineIdentityStore.loadOrCreate()
+            senderSettings = try await senderSettingsStore.load()
+            primarySenderConfiguration = senderSettings.primary
             obligations = try await obligationsStore.load()
             lastKnownObligationsModifiedAt = try await obligationsStore.modificationDate()
-            machineIdentifier = try await machineIdentityStore.loadOrCreate()
-            primarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: machineIdentifier)
             await refreshStorageStatus()
             await refresh()
         } catch {
@@ -205,6 +209,8 @@ final class ReadyRoomAppModel: ObservableObject {
         do {
             try await storageCoordinator.setCustomSharedRoot(url)
             lastKnownObligationsModifiedAt = nil
+            senderSettings = try await senderSettingsStore.load()
+            primarySenderConfiguration = senderSettings.primary
             await refreshStorageStatus()
             await refresh()
             statusMessage = url == nil ? "Using local fallback shared storage." : "Updated the shared folder for this Mac."
@@ -212,6 +218,34 @@ final class ReadyRoomAppModel: ObservableObject {
             storageStatusError = error.localizedDescription
             statusMessage = "Could not update shared folder: \(error.localizedDescription)"
         }
+    }
+
+    func saveSenderSettings(
+        johnRecipientsText: String,
+        amyRecipientsText: String,
+        scheduledSendHour: Int,
+        scheduledSendMinute: Int,
+        catchUpDeadlineHour: Int
+    ) async {
+        var settings = senderSettings
+        settings.primary.scheduledSendHour = scheduledSendHour
+        settings.primary.scheduledSendMinute = scheduledSendMinute
+        settings.primary.catchUpDeadlineHour = catchUpDeadlineHour
+        settings.johnRecipients = parseRecipients(from: johnRecipientsText)
+        settings.amyRecipients = parseRecipients(from: amyRecipientsText)
+        await persistSenderSettings(settings, status: "Saved sender settings.")
+    }
+
+    func makeThisMacPrimarySender() async {
+        var settings = senderSettings
+        settings.primary.machineIdentifier = machineIdentifier
+        await persistSenderSettings(settings, status: "This Mac is now the primary scheduled sender.")
+    }
+
+    func clearPrimarySender() async {
+        var settings = senderSettings
+        settings.primary.machineIdentifier = ""
+        await persistSenderSettings(settings, status: "Cleared the primary scheduled sender.")
     }
 
     private func syncSharedObligations(force: Bool) async -> Bool {
@@ -387,12 +421,7 @@ final class ReadyRoomAppModel: ObservableObject {
     }
 
     private func defaultRecipients(for audience: BriefingAudience) -> [String] {
-        switch audience {
-        case .john:
-            return ["john@example.com"]
-        case .amy:
-            return ["amy@example.com"]
-        }
+        senderSettings.recipients(for: audience)
     }
 
     private func updateDebugJSON() {
@@ -414,13 +443,28 @@ final class ReadyRoomAppModel: ObservableObject {
 
     private func evaluateScheduledSendsIfNeeded() async {
         let existing = (try? await sendRegistryStore.load()) ?? []
-        for audience in BriefingAudience.allCases where sendCoordinator.shouldSendToday(
-            now: now,
-            audience: audience,
-            machineIdentifier: machineIdentifier,
-            primary: primarySenderConfiguration,
-            existingRecords: existing
-        ) {
+        let dueAudiences = BriefingAudience.allCases.filter { audience in
+            let key = sendCoordinator.dedupeKey(for: now, audience: audience)
+            return attemptedScheduledSendKeys.contains(key) == false &&
+            sendCoordinator.shouldSendToday(
+                now: now,
+                audience: audience,
+                machineIdentifier: machineIdentifier,
+                primary: primarySenderConfiguration,
+                existingRecords: existing
+            )
+        }
+
+        guard dueAudiences.isEmpty == false else {
+            return
+        }
+
+        statusMessage = "Preparing morning briefing send..."
+        await refreshBriefingsForScheduledSend()
+
+        for audience in dueAudiences {
+            let key = sendCoordinator.dedupeKey(for: now, audience: audience)
+            attemptedScheduledSendKeys.insert(key)
             guard let artifact = artifact(for: audience, mode: preferredMode) ?? artifact(for: audience, mode: .templated) else {
                 continue
             }
@@ -436,6 +480,9 @@ final class ReadyRoomAppModel: ObservableObject {
     }
 
     private func performSend(artifact: BriefingArtifact, mode: SendMode, adapters: [SenderAdapter]) async throws -> SendExecutionResult {
+        guard artifact.recipients.isEmpty == false else {
+            throw NSError(domain: "ReadyRoomSend", code: 1, userInfo: [NSLocalizedDescriptionKey: "No recipients are configured for \(artifact.audience.displayName)."])
+        }
         guard let primary = adapters.first else {
             throw NSError(domain: "ReadyRoomSend", code: 0, userInfo: [NSLocalizedDescriptionKey: "No sender configured."])
         }
@@ -454,6 +501,35 @@ final class ReadyRoomAppModel: ObservableObject {
             }
             throw error
         }
+    }
+
+    private func refreshBriefingsForScheduledSend() async {
+        _ = await syncSharedObligations(force: true)
+        let snapshots = await collectSnapshots()
+        sourceSnapshots = snapshots
+        await applySnapshots(snapshots)
+        await generateNarrativesAndPreviews()
+        updateDebugJSON()
+    }
+
+    private func persistSenderSettings(_ settings: SenderSettings, status: String) async {
+        do {
+            try await senderSettingsStore.save(settings)
+            senderSettings = settings
+            primarySenderConfiguration = settings.primary
+            attemptedScheduledSendKeys.removeAll()
+            await generateNarrativesAndPreviews()
+            statusMessage = status
+        } catch {
+            statusMessage = "Could not save sender settings: \(error.localizedDescription)"
+        }
+    }
+
+    private func parseRecipients(from text: String) -> [String] {
+        text
+            .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == ";" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
     }
 }
 

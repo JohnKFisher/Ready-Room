@@ -42,6 +42,7 @@ Implemented in this foundation pass:
 - obligation occurrences now use the same carry-yesterday-until-3:00-AM day boundary as the timeline, so late-night recurring items stay attached to the expected day group
 - multi-day all-day events now appear on each day they cover in the timeline instead of only their start day, and they are only marked complete after their final covered day
 - Storage/Sync now supports a machine-local custom shared folder so different Macs can point Ready Room at different absolute Resilio Sync paths without syncing the path setting itself
+- Sender settings are now shared config instead of hardcoded placeholder recipients, with explicit primary-sender designation and fresh regeneration before scheduled morning sends
 
 Still open after this pass:
 

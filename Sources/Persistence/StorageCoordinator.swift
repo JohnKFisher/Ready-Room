@@ -199,7 +199,8 @@ public actor ReadyRoomStorageCoordinator {
             fileStatus(label: "Obligations", relativePath: "Shared/obligations.yaml", scope: .shared),
             fileStatus(label: "Calendar Configurations", relativePath: "Shared/calendar-configurations.json", scope: .shared),
             fileStatus(label: "Briefing Archive", relativePath: "Shared/briefing-archive.json", scope: .shared),
-            fileStatus(label: "Send Records", relativePath: "Shared/send-records.json", scope: .shared)
+            fileStatus(label: "Send Records", relativePath: "Shared/send-records.json", scope: .shared),
+            fileStatus(label: "Sender Settings", relativePath: "Shared/sender-settings.json", scope: .shared)
         ]
 
         let localFiles = try [

@@ -273,7 +273,7 @@ struct SettingsView: View {
                     case .storageSync:
                         StorageSyncSettingsView(model: model)
                     case .sender:
-                        settingsCard("Sender", body: "Apple Mail is the default sender path, with a primary-machine-only scheduler.")
+                        SenderSettingsView(model: model)
                     case .advancedDebug:
                         settingsCard("Advanced/Debug", body: "Use the Debug screen for raw data inspection, source health, and preview traces.")
                     }
@@ -319,6 +319,133 @@ struct SettingsView: View {
         case .advancedDebug:
             "ladybug"
         }
+    }
+}
+
+private struct SenderSettingsView: View {
+    @ObservedObject var model: ReadyRoomAppModel
+    @State private var johnRecipientsText = ""
+    @State private var amyRecipientsText = ""
+    @State private var scheduledSendHour = 6
+    @State private var scheduledSendMinute = 30
+    @State private var catchUpDeadlineHour = 12
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Sender")
+                    .font(.headline)
+                Text("Apple Mail is the active sender path. Configure the real recipient lists here, then make this Mac the primary scheduled sender if this is the machine that should send the 6:30 AM briefings.")
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Primary Sender")
+                    .font(.headline)
+                Text("This Mac ID: \(model.machineIdentifier)")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                if model.primarySenderConfiguration.machineIdentifier.isEmpty {
+                    Text("No primary sender is configured yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(model.primarySenderConfiguration.machineIdentifier == model.machineIdentifier ? "This Mac is the primary scheduled sender." : "Another Mac is currently set as the primary scheduled sender.")
+                        .foregroundStyle(.secondary)
+                    Text("Configured primary ID: \(model.primarySenderConfiguration.machineIdentifier)")
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Button("Make This Mac Primary") {
+                        Task { await model.makeThisMacPrimarySender() }
+                    }
+                    Button("Clear Primary Sender") {
+                        Task { await model.clearPrimarySender() }
+                    }
+                    .disabled(model.primarySenderConfiguration.machineIdentifier.isEmpty)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Recipients")
+                    .font(.headline)
+                Text("Use commas, semicolons, or new lines to separate addresses.")
+                    .foregroundStyle(.secondary)
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 12) {
+                    GridRow {
+                        Text("John")
+                        TextField("john@example.com, another@example.com", text: $johnRecipientsText, axis: .vertical)
+                            .lineLimit(2...4)
+                    }
+                    GridRow {
+                        Text("Amy")
+                        TextField("amy@example.com", text: $amyRecipientsText, axis: .vertical)
+                            .lineLimit(2...4)
+                    }
+                }
+                if johnRecipientsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || amyRecipientsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Both briefings need at least one real recipient before morning sends will succeed.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Schedule")
+                    .font(.headline)
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Send Hour")
+                        Stepper("\(scheduledSendHour)", value: $scheduledSendHour, in: 0...23)
+                    }
+                    GridRow {
+                        Text("Send Minute")
+                        Stepper("\(scheduledSendMinute)", value: $scheduledSendMinute, in: 0...59)
+                    }
+                    GridRow {
+                        Text("Catch-Up Deadline")
+                        Stepper("\(catchUpDeadlineHour):00", value: $catchUpDeadlineHour, in: 1...23)
+                    }
+                }
+                Text("Current schedule: \(String(format: "%02d:%02d", scheduledSendHour, scheduledSendMinute)) with same-day catch-up until \(catchUpDeadlineHour):00.")
+                    .foregroundStyle(.secondary)
+                Button("Save Sender Settings") {
+                    Task {
+                        await model.saveSenderSettings(
+                            johnRecipientsText: johnRecipientsText,
+                            amyRecipientsText: amyRecipientsText,
+                            scheduledSendHour: scheduledSendHour,
+                            scheduledSendMinute: scheduledSendMinute,
+                            catchUpDeadlineHour: catchUpDeadlineHour
+                        )
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .onAppear(perform: loadFromModel)
+        .onChange(of: model.senderSettings) { _, _ in
+            loadFromModel()
+        }
+    }
+
+    private func loadFromModel() {
+        johnRecipientsText = model.senderSettings.johnRecipients.joined(separator: ", ")
+        amyRecipientsText = model.senderSettings.amyRecipients.joined(separator: ", ")
+        scheduledSendHour = model.senderSettings.primary.scheduledSendHour
+        scheduledSendMinute = model.senderSettings.primary.scheduledSendMinute
+        catchUpDeadlineHour = model.senderSettings.primary.catchUpDeadlineHour
     }
 }
 

@@ -162,6 +162,23 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func scheduledSendCoordinatorDoesNotSendWhenNoPrimaryMachineIsConfigured() {
+        let coordinator = ScheduledSendCoordinator()
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 13, hour: 7, minute: 0))!
+
+        let shouldSend = coordinator.shouldSendToday(
+            now: now,
+            audience: .john,
+            machineIdentifier: "mac-mini",
+            primary: PrimarySenderConfiguration(machineIdentifier: ""),
+            existingRecords: []
+        )
+
+        #expect(shouldSend == false)
+    }
+
+    @Test
     func dictionaryBuilderKeepsLastDuplicateValueInsteadOfCrashing() {
         let dictionary = ReadyRoomCollections.dictionaryLastValueWins(
             from: [
@@ -418,6 +435,18 @@ struct ReadyRoomFoundationTests {
         #expect(status.summary.contains("custom shared folder"))
         #expect(status.detail.contains("stored locally on this Mac"))
         #expect(status.detail.contains("different absolute Resilio Sync path"))
+    }
+
+    @Test
+    func senderSettingsReturnAudienceSpecificRecipients() {
+        let settings = SenderSettings(
+            primary: PrimarySenderConfiguration(machineIdentifier: "mac-mini"),
+            johnRecipients: ["john@example.com", "family@example.com"],
+            amyRecipients: ["amy@example.com"]
+        )
+
+        #expect(settings.recipients(for: .john) == ["john@example.com", "family@example.com"])
+        #expect(settings.recipients(for: .amy) == ["amy@example.com"])
     }
 
     @Test

@@ -75,6 +75,23 @@ public actor DashboardLayoutStore {
     }
 }
 
+public actor SenderSettingsStore {
+    private let coordinator: ReadyRoomStorageCoordinator
+    private let path = "Shared/sender-settings.json"
+
+    public init(coordinator: ReadyRoomStorageCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    public func load() async throws -> SenderSettings {
+        try await coordinator.loadJSON(SenderSettings.self, relativePath: path, scope: .shared) ?? SenderSettings()
+    }
+
+    public func save(_ settings: SenderSettings) async throws {
+        try await coordinator.saveJSON(settings, relativePath: path, scope: .shared)
+    }
+}
+
 public actor SetupProgressStore {
     private let coordinator: ReadyRoomStorageCoordinator
     private let path = "Local/setup-progress.json"
@@ -109,4 +126,3 @@ public actor MachineIdentityStore {
         return identifier
     }
 }
-

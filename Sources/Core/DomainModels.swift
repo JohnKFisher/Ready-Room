@@ -802,6 +802,31 @@ public struct PrimarySenderConfiguration: Codable, Sendable, Hashable {
     }
 }
 
+public struct SenderSettings: Codable, Sendable, Hashable {
+    public var primary: PrimarySenderConfiguration
+    public var johnRecipients: [String]
+    public var amyRecipients: [String]
+
+    public init(
+        primary: PrimarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: ""),
+        johnRecipients: [String] = [],
+        amyRecipients: [String] = []
+    ) {
+        self.primary = primary
+        self.johnRecipients = johnRecipients
+        self.amyRecipients = amyRecipients
+    }
+
+    public func recipients(for audience: BriefingAudience) -> [String] {
+        switch audience {
+        case .john:
+            johnRecipients
+        case .amy:
+            amyRecipients
+        }
+    }
+}
+
 public protocol SourceConnector: Sendable {
     var source: SourceDescriptor { get }
     func refresh() async throws -> SourceSnapshot
