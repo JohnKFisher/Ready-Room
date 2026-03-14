@@ -181,6 +181,7 @@ struct ReadyRoomFoundationTests {
             audience: .john,
             machineIdentifier: "primary-machine",
             senderID: "mail",
+            sendMode: .scheduled,
             status: .sent,
             preferredMode: .templated,
             actualMode: .templated,
@@ -194,6 +195,69 @@ struct ReadyRoomFoundationTests {
             machineIdentifier: "primary-machine",
             primary: primary,
             existingRecords: [sentRecord]
+        )
+
+        #expect(shouldSend == false)
+    }
+
+    @Test
+    func scheduledSendCoordinatorIgnoresEarlierManualTestSends() {
+        let coordinator = ScheduledSendCoordinator()
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 6, minute: 30))!
+        let earlierManualTest = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 2, minute: 42))!
+
+        let shouldSend = coordinator.shouldSendToday(
+            now: now,
+            audience: .john,
+            machineIdentifier: "primary-machine",
+            primary: PrimarySenderConfiguration(machineIdentifier: "primary-machine"),
+            existingRecords: [
+                SendExecutionRecord(
+                    briefingDate: earlierManualTest,
+                    audience: .john,
+                    machineIdentifier: "primary-machine",
+                    senderID: "mail",
+                    sendMode: .manualTest,
+                    status: .sent,
+                    preferredMode: .templated,
+                    actualMode: .templated,
+                    createdAt: earlierManualTest,
+                    completedAt: earlierManualTest,
+                    dedupeKey: coordinator.dedupeKey(for: earlierManualTest, audience: .john)
+                )
+            ]
+        )
+
+        #expect(shouldSend)
+    }
+
+    @Test
+    func scheduledSendCoordinatorTreatsLegacyScheduledWindowSendAsDuplicate() {
+        let coordinator = ScheduledSendCoordinator()
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 7, minute: 0))!
+        let legacyScheduledTime = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 6, minute: 31))!
+
+        let shouldSend = coordinator.shouldSendToday(
+            now: now,
+            audience: .amy,
+            machineIdentifier: "primary-machine",
+            primary: PrimarySenderConfiguration(machineIdentifier: "primary-machine"),
+            existingRecords: [
+                SendExecutionRecord(
+                    briefingDate: legacyScheduledTime,
+                    audience: .amy,
+                    machineIdentifier: "primary-machine",
+                    senderID: "mail",
+                    status: .sent,
+                    preferredMode: .templated,
+                    actualMode: .templated,
+                    createdAt: legacyScheduledTime,
+                    completedAt: legacyScheduledTime,
+                    dedupeKey: coordinator.dedupeKey(for: legacyScheduledTime, audience: .amy)
+                )
+            ]
         )
 
         #expect(shouldSend == false)
@@ -214,6 +278,37 @@ struct ReadyRoomFoundationTests {
         )
 
         #expect(shouldSend == false)
+    }
+
+    @Test
+    func appleMailSenderProjectsHTMLToReadablePlainText() {
+        let composer = BriefingComposer()
+        let request = BriefingRequest(
+            audience: .john,
+            normalizedItems: [],
+            weather: WeatherSnapshot(summary: "Sunny", currentTemperatureF: 60, highF: 70, lowF: 48),
+            headlines: [],
+            mediaItems: [],
+            dueSoon: [],
+            preferredMode: .templated
+        )
+        let opening = GeneratedNarrative(text: "Today looks busy.", preferredMode: .templated, actualMode: .templated)
+        let news = GeneratedNarrative(text: "", preferredMode: .templated, actualMode: .templated)
+        let artifact = composer.compose(
+            request: request,
+            recipients: ["john@example.com"],
+            openingLine: opening,
+            newsSummary: news
+        )
+        let sender = AppleMailSenderAdapter()
+
+        let bodyText = sender.mailCompatibleBodyText(for: artifact)
+
+        #expect(bodyText.contains("Apple Mail compatibility mode"))
+        #expect(bodyText.contains("Ready Room is in very, very early development."))
+        #expect(bodyText.contains("Good morning, John."))
+        #expect(bodyText.contains("<html>") == false)
+        #expect(bodyText.contains("<body") == false)
     }
 
     @Test

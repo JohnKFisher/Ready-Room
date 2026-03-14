@@ -763,6 +763,7 @@ public struct SendExecutionRecord: Codable, Sendable, Hashable, Identifiable {
     public var audience: BriefingAudience
     public var machineIdentifier: String
     public var senderID: String
+    public var sendMode: SendMode?
     public var status: SendStatus
     public var preferredMode: NarrativeGenerationMode
     public var actualMode: NarrativeGenerationMode
@@ -777,6 +778,7 @@ public struct SendExecutionRecord: Codable, Sendable, Hashable, Identifiable {
         audience: BriefingAudience,
         machineIdentifier: String,
         senderID: String,
+        sendMode: SendMode? = nil,
         status: SendStatus,
         preferredMode: NarrativeGenerationMode,
         actualMode: NarrativeGenerationMode,
@@ -790,6 +792,7 @@ public struct SendExecutionRecord: Codable, Sendable, Hashable, Identifiable {
         self.audience = audience
         self.machineIdentifier = machineIdentifier
         self.senderID = senderID
+        self.sendMode = sendMode
         self.status = status
         self.preferredMode = preferredMode
         self.actualMode = actualMode
