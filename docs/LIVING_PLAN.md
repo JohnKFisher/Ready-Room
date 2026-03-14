@@ -43,6 +43,7 @@ Implemented in this foundation pass:
 - multi-day all-day events now appear on each day they cover in the timeline instead of only their start day, and they are only marked complete after their final covered day
 - Storage/Sync now supports a machine-local custom shared folder so different Macs can point Ready Room at different absolute Resilio Sync paths without syncing the path setting itself
 - Sender settings are now shared config instead of hardcoded placeholder recipients, with explicit primary-sender designation and fresh regeneration before scheduled morning sends
+- generated briefings now carry a prominent early-development warning banner and explicitly label placeholder-derived weather, news, media, and calendar content
 
 Still open after this pass:
 

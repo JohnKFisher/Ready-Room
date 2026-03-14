@@ -642,6 +642,10 @@ public struct BriefingRequest: Codable, Sendable, Hashable {
     public var mediaItems: [MediaActivity]
     public var dueSoon: [NormalizedItem]
     public var preferredMode: NarrativeGenerationMode
+    public var calendarPlaceholderLabel: String?
+    public var weatherPlaceholderLabel: String?
+    public var newsPlaceholderLabel: String?
+    public var mediaPlaceholderLabel: String?
 
     public init(
         audience: BriefingAudience,
@@ -651,7 +655,11 @@ public struct BriefingRequest: Codable, Sendable, Hashable {
         headlines: [NewsHeadline],
         mediaItems: [MediaActivity],
         dueSoon: [NormalizedItem],
-        preferredMode: NarrativeGenerationMode
+        preferredMode: NarrativeGenerationMode,
+        calendarPlaceholderLabel: String? = nil,
+        weatherPlaceholderLabel: String? = nil,
+        newsPlaceholderLabel: String? = nil,
+        mediaPlaceholderLabel: String? = nil
     ) {
         self.audience = audience
         self.date = date
@@ -661,6 +669,10 @@ public struct BriefingRequest: Codable, Sendable, Hashable {
         self.mediaItems = mediaItems
         self.dueSoon = dueSoon
         self.preferredMode = preferredMode
+        self.calendarPlaceholderLabel = calendarPlaceholderLabel
+        self.weatherPlaceholderLabel = weatherPlaceholderLabel
+        self.newsPlaceholderLabel = newsPlaceholderLabel
+        self.mediaPlaceholderLabel = mediaPlaceholderLabel
     }
 }
 

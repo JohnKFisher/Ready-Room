@@ -396,7 +396,11 @@ final class ReadyRoomAppModel: ObservableObject {
                     headlines: weightedHeadlines(for: audience),
                     mediaItems: mediaItems,
                     dueSoon: dueSoon.filter { audience == .john ? $0.inclusion.johnBriefing : $0.inclusion.amyBriefing },
-                    preferredMode: mode
+                    preferredMode: mode,
+                    calendarPlaceholderLabel: placeholderLabel(for: .calendar),
+                    weatherPlaceholderLabel: placeholderLabel(for: .weather),
+                    newsPlaceholderLabel: placeholderLabel(for: .news),
+                    mediaPlaceholderLabel: placeholderLabel(for: .media)
                 )
                 let artifact = BriefingComposer().compose(
                     request: request,

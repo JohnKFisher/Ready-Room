@@ -133,6 +133,44 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func briefingComposerLabelsPlaceholderContentAndShowsDevelopmentWarning() {
+        let calendar = Calendar.readyRoomGregorian
+        let item = NormalizedItem(
+            id: "calendar:sample",
+            source: SourceDescriptor(id: "sample-calendar", displayName: "Sample Calendar", type: .calendar),
+            sourceIdentifier: "sample",
+            sourceType: .calendar,
+            title: "Amy - Chicago",
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 9))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 10))!
+        )
+        let request = BriefingRequest(
+            audience: .john,
+            normalizedItems: [item],
+            weather: WeatherSnapshot(summary: "Sunny", currentTemperatureF: 60, highF: 70, lowF: 48),
+            headlines: [NewsHeadline(title: "Headline", sourceName: "AP")],
+            mediaItems: [MediaActivity(kind: .newAddition, title: "The Wild Robot")],
+            dueSoon: [],
+            preferredMode: .templated,
+            calendarPlaceholderLabel: "Sample calendar data",
+            weatherPlaceholderLabel: "Sample weather data",
+            newsPlaceholderLabel: "Sample news headlines",
+            mediaPlaceholderLabel: "Sample Plex/media activity"
+        )
+        let opening = GeneratedNarrative(text: "Busy but manageable.", preferredMode: .templated, actualMode: .templated)
+        let news = GeneratedNarrative(text: "Headline", preferredMode: .templated, actualMode: .templated)
+
+        let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
+
+        #expect(artifact.bodyHTML.contains("very, very early development"))
+        #expect(artifact.bodyHTML.contains("should not be trusted or relied on"))
+        #expect(artifact.bodyHTML.contains("[Placeholder]"))
+        #expect(artifact.bodyHTML.contains("Sample weather data"))
+        #expect(artifact.bodyHTML.contains("Sample news headlines"))
+        #expect(artifact.bodyHTML.contains("Sample Plex/media activity"))
+    }
+
+    @Test
     func scheduledSendCoordinatorPreventsDuplicateSends() {
         let coordinator = ScheduledSendCoordinator()
         let calendar = Calendar.readyRoomGregorian

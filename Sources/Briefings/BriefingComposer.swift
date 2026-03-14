@@ -67,7 +67,7 @@ public struct BriefingComposer: Sendable {
             return start >= request.date && start < noon
         }
         if !thisMorning.isEmpty {
-            sections.append(makeSection(title: "This Morning", items: thisMorning))
+            sections.append(makeSection(title: "This Morning", items: thisMorning, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         let today = relevant.filter {
@@ -75,7 +75,7 @@ public struct BriefingComposer: Sendable {
             return start >= startOfToday && start < evening
         }
         if !today.isEmpty {
-            sections.append(makeSection(title: "Today", items: today))
+            sections.append(makeSection(title: "Today", items: today, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         let tonight = relevant.filter {
@@ -83,7 +83,7 @@ public struct BriefingComposer: Sendable {
             return start >= evening && start < tomorrow
         }
         if !tonight.isEmpty {
-            sections.append(makeSection(title: "Tonight", items: tonight))
+            sections.append(makeSection(title: "Tonight", items: tonight, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         let comingUp = relevant.filter {
@@ -91,7 +91,7 @@ public struct BriefingComposer: Sendable {
             return start >= tomorrow && start < weekOut
         }
         if !comingUp.isEmpty {
-            sections.append(makeSection(title: "Coming Up", items: comingUp))
+            sections.append(makeSection(title: "Coming Up", items: comingUp, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         if !request.dueSoon.isEmpty {
@@ -100,15 +100,18 @@ public struct BriefingComposer: Sendable {
 
         let changed = relevant.filter { $0.changeState != .unchanged }
         if !changed.isEmpty {
-            sections.append(makeSection(title: "New or Changed", items: changed))
+            sections.append(makeSection(title: "New or Changed", items: changed, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         if !request.headlines.isEmpty {
+            let body = request.newsPlaceholderLabel.map { placeholderLabel in
+                placeholderNotice(label: placeholderLabel) + "<br/><br/>" + newsSummary.text
+            } ?? newsSummary.text
             sections.append(
                 BriefingSection(
                     id: "world",
                     title: "In The World",
-                    body: newsSummary.text,
+                    body: body,
                     items: []
                 )
             )
@@ -119,11 +122,14 @@ public struct BriefingComposer: Sendable {
             let body = additions.map { activity in
                 activity.subtitle.map { "\(activity.title) — \($0)" } ?? activity.title
             }.joined(separator: "<br/>")
+            let labeledBody = request.mediaPlaceholderLabel.map { placeholderLabel in
+                placeholderNotice(label: placeholderLabel) + "<br/><br/>" + body
+            } ?? body
             sections.append(
                 BriefingSection(
                     id: "media",
                     title: "Media",
-                    body: body,
+                    body: labeledBody,
                     items: []
                 )
             )
@@ -132,7 +138,7 @@ public struct BriefingComposer: Sendable {
         return sections
     }
 
-    private func makeSection(title: String, items: [NormalizedItem]) -> BriefingSection {
+    private func makeSection(title: String, items: [NormalizedItem], calendarPlaceholderLabel: String? = nil) -> BriefingSection {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         formatter.dateStyle = .none
@@ -148,7 +154,8 @@ public struct BriefingComposer: Sendable {
             }
 
             let location = item.location.map { " (\($0))" } ?? ""
-            return [prefix, item.title + location]
+            let placeholderPrefix = item.sourceType == .calendar && calendarPlaceholderLabel != nil ? "[Placeholder] " : ""
+            return [prefix, placeholderPrefix + item.title + location]
                 .filter { !$0.isEmpty }
                 .joined(separator: " — ")
         }
@@ -164,7 +171,8 @@ public struct BriefingComposer: Sendable {
 
     private func renderHTML(request: BriefingRequest, openingLine: String, newsSummary: String, sections: [BriefingSection]) -> String {
         let weather = request.weather.map {
-            "\($0.summary), \(Int($0.currentTemperatureF))F now, high \(Int($0.highF))/low \(Int($0.lowF))"
+            let weatherLine = "\($0.summary), \(Int($0.currentTemperatureF))F now, high \(Int($0.highF))/low \(Int($0.lowF))"
+            return request.weatherPlaceholderLabel.map { "\(placeholderNotice(label: $0))<br/>\(weatherLine)" } ?? weatherLine
         } ?? "Weather unavailable"
 
         let sectionHTML = sections.map { section in
@@ -186,6 +194,9 @@ public struct BriefingComposer: Sendable {
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; margin: 24px; color: #1f2933;">
             <div style="max-width: 760px; margin: 0 auto;">
+                <div style="margin-bottom: 16px; padding: 12px 14px; border: 1px solid #f5c778; border-radius: 12px; background: #fff4db; color: #7c4a03; font-size: 13px; font-weight: 600;">
+                    Ready Room is in very, very early development. This email may contain placeholder data or incorrect classifications and should not be trusted or relied on.
+                </div>
                 <header style="margin-bottom: 24px;">
                     <p style="font-size: 14px; margin: 0 0 8px 0; color: #52606d;">\(request.date.formattedMonthDayWeekday())</p>
                     <h1 style="font-size: 22px; margin: 0 0 8px 0;">Good morning, \(request.audience.displayName).</h1>
@@ -206,7 +217,22 @@ public struct BriefingComposer: Sendable {
         summary.append("Due soon: \(request.dueSoon.count)")
         summary.append("News headlines: \(request.headlines.count)")
         summary.append("Media additions: \(request.mediaItems.filter { $0.kind == .newAddition }.count)")
+        if let calendarPlaceholderLabel = request.calendarPlaceholderLabel {
+            summary.append("Calendar placeholder: \(calendarPlaceholderLabel)")
+        }
+        if let weatherPlaceholderLabel = request.weatherPlaceholderLabel {
+            summary.append("Weather placeholder: \(weatherPlaceholderLabel)")
+        }
+        if let newsPlaceholderLabel = request.newsPlaceholderLabel {
+            summary.append("News placeholder: \(newsPlaceholderLabel)")
+        }
+        if let mediaPlaceholderLabel = request.mediaPlaceholderLabel {
+            summary.append("Media placeholder: \(mediaPlaceholderLabel)")
+        }
         return summary
     }
-}
 
+    private func placeholderNotice(label: String) -> String {
+        "<strong>[Placeholder]</strong> \(label)"
+    }
+}
