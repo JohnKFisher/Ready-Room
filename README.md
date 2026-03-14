@@ -27,3 +27,4 @@ Once the app target is built, a local `.app` bundle can be created with:
 ./scripts/build_app.sh
 ```
 
+`build_app.sh` is the official versioned build path. It increments the app build number on every run and auto-advances the patch version unless you manually bump the major or minor version, in which case the patch resets to `0`.

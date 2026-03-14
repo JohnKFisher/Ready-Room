@@ -6,11 +6,26 @@ struct RootContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(ReadyRoomAppModel.Screen.allCases, selection: $model.selectedScreen) { screen in
-                Label(screen.rawValue.capitalized, systemImage: icon(for: screen))
-                    .tag(screen)
+            VStack(spacing: 0) {
+                List(ReadyRoomAppModel.Screen.allCases, selection: $model.selectedScreen) { screen in
+                    Label(screen.rawValue.capitalized, systemImage: icon(for: screen))
+                        .tag(screen)
+                }
+                .frame(minWidth: 200)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Divider()
+                    Text("Version")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(AppRuntimeMetadata.displayString)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
-            .frame(minWidth: 200)
         } detail: {
             ZStack {
                 Color(nsColor: .windowBackgroundColor)

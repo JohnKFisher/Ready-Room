@@ -15,16 +15,16 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.1.1</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Ready Room automates Mail to send scheduled family briefings.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Ready Room reads calendars to build a family dashboard and daily briefings.</string>
 	<key>NSUserNotificationUsageDescription</key>
 	<string>Ready Room uses notifications for major changes and family conflict alerts.</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Ready Room automates Mail to send scheduled family briefings.</string>
 </dict>
 </plist>
