@@ -239,9 +239,14 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(ReadyRoomAppModel.PreferencesSection.allCases, selection: $model.selectedPreferencesSection) { section in
-                Text(section.rawValue)
+            List(selection: $model.selectedPreferencesSection) {
+                ForEach(ReadyRoomAppModel.PreferencesSection.allCases) { section in
+                    Label(section.rawValue, systemImage: icon(for: section))
+                        .tag(section)
+                }
             }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 240)
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -286,6 +291,33 @@ struct SettingsView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func icon(for section: ReadyRoomAppModel.PreferencesSection) -> String {
+        switch section {
+        case .general:
+            "gear"
+        case .calendars:
+            "calendar"
+        case .briefings:
+            "envelope.open"
+        case .dashboard:
+            "rectangle.grid.2x2"
+        case .obligations:
+            "checklist"
+        case .ai:
+            "sparkles"
+        case .news:
+            "newspaper"
+        case .media:
+            "play.rectangle"
+        case .storageSync:
+            "externaldrive"
+        case .sender:
+            "paperplane"
+        case .advancedDebug:
+            "ladybug"
+        }
     }
 }
 

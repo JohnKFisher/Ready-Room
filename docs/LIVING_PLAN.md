@@ -37,6 +37,7 @@ Implemented in this foundation pass:
 - open apps now reload shared obligations on refresh and watch the shared obligations file timestamp during the existing minute loop so cross-Mac updates can appear without relaunch
 - calendar items are only marked cancelled when the source explicitly reports cancellation, and the dashboard now keeps yesterday visible until 3:00 AM while dimming finished items as complete
 - the timeline remains permissive for calendar items even when their dashboard include-flag is false, preventing a regression where the main timeline appeared nearly empty
+- the Settings sidebar now uses explicit tagged sidebar rows so subsection selection works reliably on macOS
 
 Still open after this pass:
 
