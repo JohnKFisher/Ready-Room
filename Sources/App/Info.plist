@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>Ready Room</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.jkfisher.readyroom</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Ready Room</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Ready Room reads calendars to build a family dashboard and daily briefings.</string>
+	<key>NSUserNotificationUsageDescription</key>
+	<string>Ready Room uses notifications for major changes and family conflict alerts.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Ready Room automates Mail to send scheduled family briefings.</string>
+</dict>
+</plist>
