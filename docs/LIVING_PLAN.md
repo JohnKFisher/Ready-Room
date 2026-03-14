@@ -33,6 +33,7 @@ Implemented in this foundation pass:
 - SwiftUI app shell for dashboard, preview, obligations, settings, and debug flows
 - obligations editor now supports post-parse field edits, inline explanation editing, and click-to-edit for saved items
 - sample placeholder sources are explicitly labeled in the dashboard and debug source-health views until live connectors replace them
+- obligations now appear on the dashboard timeline as all-day items, due-soon cards show remaining days, and Storage/Sync preferences expose the actual shared-vs-local file locations and sync mode
 
 Still open after this pass:
 

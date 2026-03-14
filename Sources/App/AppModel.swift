@@ -59,6 +59,8 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var preferredMode: NarrativeGenerationMode = .foundationModels
     @Published var machineIdentifier = ""
     @Published var primarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: "")
+    @Published var storageStatus: StorageStatus?
+    @Published var storageStatusError: String?
     @Published var debugJSON = ""
     @Published var quietHours = QuietHoursSettings()
     @Published var lastGeneratedPreviewAudience: BriefingAudience = .john
@@ -89,6 +91,7 @@ final class ReadyRoomAppModel: ObservableObject {
             obligations = try await obligationsStore.load()
             machineIdentifier = try await machineIdentityStore.loadOrCreate()
             primarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: machineIdentifier)
+            await refreshStorageStatus()
             await refresh()
         } catch {
             statusMessage = "Bootstrap failed: \(error.localizedDescription)"
@@ -158,6 +161,7 @@ final class ReadyRoomAppModel: ObservableObject {
         }
         do {
             try await obligationsStore.save(obligations)
+            await refreshStorageStatus()
             obligationDraft = ""
             cancelObligationEditing()
             statusMessage = existingIndex == nil ? "Saved obligation." : "Updated obligation."
@@ -180,6 +184,16 @@ final class ReadyRoomAppModel: ObservableObject {
 
     func placeholderLabel(for type: SourceType) -> String? {
         snapshot(for: type)?.placeholderLabel
+    }
+
+    func refreshStorageStatus() async {
+        do {
+            storageStatus = try await storageCoordinator.describeStorageStatus()
+            storageStatusError = nil
+        } catch {
+            storageStatus = nil
+            storageStatusError = error.localizedDescription
+        }
     }
 
     func moveCard(_ kind: DashboardCardKind, direction: Int) {

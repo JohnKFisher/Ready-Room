@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import ReadyRoomCore
+import ReadyRoomPersistence
 
 struct PreviewView: View {
     @ObservedObject var model: ReadyRoomAppModel
@@ -264,7 +265,7 @@ struct SettingsView: View {
                     case .media:
                         settingsCard("Media", body: "Plex, Tautulli, Sonarr, and Radarr configuration belongs here.")
                     case .storageSync:
-                        settingsCard("Storage/Sync", body: "Shared state uses iCloud Documents when available, with local fallback for machine-only state.")
+                        StorageSyncSettingsView(model: model)
                     case .sender:
                         settingsCard("Sender", body: "Apple Mail is the default sender path, with a primary-machine-only scheduler.")
                     case .advancedDebug:
@@ -285,6 +286,121 @@ struct SettingsView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct StorageSyncSettingsView: View {
+    @ObservedObject var model: ReadyRoomAppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Storage/Sync")
+                        .font(.headline)
+                    Text("Shared files should live in iCloud Drive when available. If not, the app falls back to a local-only shared folder on this Mac.")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Refresh Status") {
+                    Task { await model.refreshStorageStatus() }
+                }
+            }
+
+            if let status = model.storageStatus {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        Text("Shared Storage Mode")
+                            .font(.subheadline.weight(.semibold))
+                        Text(status.roots.sharedMode.rawValue)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(status.roots.syncsAcrossMacs ? Color.green.opacity(0.15) : Color.orange.opacity(0.18), in: Capsule())
+                    }
+                    Text(status.summary)
+                    Text(status.detail)
+                        .foregroundStyle(.secondary)
+
+                    storagePathRow(title: "Local Root", url: status.roots.localRoot)
+                    storagePathRow(title: "Effective Shared Root", url: status.roots.effectiveSharedRoot)
+                    if let sharedRoot = status.roots.sharedRoot {
+                        storagePathRow(title: "iCloud Shared Root", url: sharedRoot)
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+                storageFilesCard(
+                    title: "Shared Across Macs",
+                    subtitle: status.roots.syncsAcrossMacs ? "These files are in iCloud Drive and should sync." : "These files are currently falling back to a local folder, so they will not sync yet.",
+                    files: status.sharedFiles
+                )
+
+                storageFilesCard(
+                    title: "Local Only",
+                    subtitle: "These files intentionally stay on this Mac.",
+                    files: status.localFiles
+                )
+            } else if let error = model.storageStatusError {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Storage Status Error")
+                        .font(.headline)
+                    Text(error)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            } else {
+                ProgressView("Loading storage status...")
+            }
+        }
+    }
+
+    private func storageFilesCard(title: String, subtitle: String, files: [StorageFileStatus]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.headline)
+            Text(subtitle)
+                .foregroundStyle(.secondary)
+            ForEach(files) { file in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(file.label)
+                            .font(.subheadline.weight(.semibold))
+                        Text(file.exists ? "Present" : "Missing")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background((file.exists ? Color.green : Color.secondary).opacity(0.15), in: Capsule())
+                    }
+                    Text(file.url.path)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                    if let modifiedAt = file.modifiedAt {
+                        Text("Last modified: \(modifiedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func storagePathRow(title: String, url: URL) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(url.path)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+        }
     }
 }
 

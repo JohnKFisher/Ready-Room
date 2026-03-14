@@ -177,4 +177,16 @@ struct ReadyRoomFoundationTests {
         #expect(placeholderSnapshot.placeholderLabel == "Sample weather data")
         #expect(liveSnapshot.isPlaceholder == false)
     }
+
+    @Test
+    func storageRootsUseLocalFallbackWhenICloudRootIsUnavailable() {
+        let roots = StorageRoots(
+            localRoot: URL(filePath: "/tmp/ReadyRoom"),
+            sharedRoot: nil
+        )
+
+        #expect(roots.sharedMode == .localFallback)
+        #expect(roots.syncsAcrossMacs == false)
+        #expect(roots.effectiveSharedRoot.path == "/tmp/ReadyRoom/SharedFallback")
+    }
 }

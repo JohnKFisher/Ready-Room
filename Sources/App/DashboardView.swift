@@ -6,9 +6,16 @@ import ReadyRoomCore
 struct DashboardView: View {
     @ObservedObject var model: ReadyRoomAppModel
 
+    private var timelineItems: [NormalizedItem] {
+        let merged = model.normalizedItems + model.dueSoon.filter { obligation in
+            model.normalizedItems.contains(where: { $0.id == obligation.id }) == false
+        }
+        return merged.filter(\.inclusion.dashboard)
+    }
+
     private var groupedTimeline: [TimelineDayGroup] {
         let calendar = Calendar.readyRoomGregorian
-        let grouped = Dictionary(grouping: model.normalizedItems) { item in
+        let grouped = Dictionary(grouping: timelineItems) { item in
             calendar.startOfDay(for: item.startDate ?? model.now)
         }
         return grouped.keys.sorted().map { date in
@@ -202,8 +209,14 @@ struct DashboardView: View {
                     switch card {
                     case .dueSoon:
                         ForEach(model.dueSoon) { item in
-                            Text(item.title)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(dueSoonDetail(for: item))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     case .weather:
                         if let weather = model.weather {
@@ -274,6 +287,28 @@ struct DashboardView: View {
             return "Tomorrow — \(formatter.string(from: date))"
         }
         return formatter.string(from: date)
+    }
+
+    private func dueSoonDetail(for item: NormalizedItem) -> String {
+        guard let dueDate = item.startDate else {
+            return "Due date unavailable"
+        }
+
+        let calendar = Calendar.readyRoomGregorian
+        let days = calendar.dateComponents([.day], from: model.now.startOfDay(in: calendar), to: dueDate.startOfDay(in: calendar)).day ?? 0
+        let dayLabel: String
+        switch days {
+        case ..<0:
+            dayLabel = "Past due"
+        case 0:
+            dayLabel = "Due today"
+        case 1:
+            dayLabel = "Due tomorrow"
+        default:
+            dayLabel = "Due in \(days) days"
+        }
+
+        return "\(dayLabel) • \(dueDate.formattedMonthDayWeekday())"
     }
 }
 
