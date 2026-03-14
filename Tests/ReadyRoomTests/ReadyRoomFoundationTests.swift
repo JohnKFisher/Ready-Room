@@ -179,6 +179,82 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func calendarEventDisappearanceIsNotTreatedAsCancellation() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let previous = NormalizedItem(
+            id: "calendar:missing",
+            source: source,
+            sourceIdentifier: "missing",
+            sourceType: .calendar,
+            title: "Previously seen",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(1800)
+        )
+
+        let items = engine.normalizeCalendarEvents([], source: source, configurations: [:], health: .healthy, previousItems: [previous.id: previous])
+
+        #expect(items.isEmpty)
+    }
+
+    @Test
+    func explicitCancelledCalendarEventRemainsCancelled() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "cancelled",
+            calendarIdentifier: "shared",
+            calendarTitle: "Family Shared",
+            title: "Soccer practice",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600),
+            isCancelled: true
+        )
+
+        let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].changeState == .cancelled)
+    }
+
+    @Test
+    func dashboardTimelinePolicyShowsYesterdayUntilThreeAM() {
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 2, minute: 15))!
+        let yesterday = calendar.date(from: DateComponents(year: 2026, month: 3, day: 13, hour: 18, minute: 0))!
+        let yesterdayItem = NormalizedItem(
+            id: "calendar:yesterday",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "yesterday",
+            sourceType: .calendar,
+            title: "Dinner",
+            startDate: yesterday,
+            endDate: yesterday.addingTimeInterval(3600)
+        )
+
+        #expect(DashboardTimelinePolicy.includes(yesterdayItem, now: now))
+        #expect(DashboardTimelinePolicy.isCompleted(yesterdayItem, now: now))
+    }
+
+    @Test
+    func dashboardTimelinePolicyHidesYesterdayAfterThreeAM() {
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 3, minute: 1))!
+        let yesterday = calendar.date(from: DateComponents(year: 2026, month: 3, day: 13, hour: 18, minute: 0))!
+        let yesterdayItem = NormalizedItem(
+            id: "calendar:yesterday",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "yesterday",
+            sourceType: .calendar,
+            title: "Dinner",
+            startDate: yesterday,
+            endDate: yesterday.addingTimeInterval(3600)
+        )
+
+        #expect(DashboardTimelinePolicy.includes(yesterdayItem, now: now) == false)
+    }
+
+    @Test
     func storageRootsUseLocalFallbackWhenICloudRootIsUnavailable() {
         let roots = StorageRoots(
             localRoot: URL(filePath: "/tmp/ReadyRoom"),

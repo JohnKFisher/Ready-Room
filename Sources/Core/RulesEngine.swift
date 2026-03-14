@@ -28,23 +28,10 @@ public struct ReadyRoomRulesEngine: Sendable {
         health: SourceHealthStatus,
         previousItems: [String: NormalizedItem] = [:]
     ) -> [NormalizedItem] {
-        let currentItems = events.map { event in
+        events.map { event in
             normalizeCalendarEvent(event, source: source, configuration: configurations[event.calendarIdentifier], health: health, previousItems: previousItems)
         }
-
-        let cancellations = previousItems.values
-            .filter { previous in
-                previous.sourceType == .calendar &&
-                currentItems.contains(where: { $0.id == previous.id }) == false &&
-                (previous.startDate ?? .distantPast) < Date().adding(days: 7)
-            }
-            .map { previous in
-                var cancelled = previous
-                cancelled.changeState = .cancelled
-                return cancelled
-            }
-
-        return (currentItems + cancellations).sorted {
+        .sorted {
             ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture)
         }
     }

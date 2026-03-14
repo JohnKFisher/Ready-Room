@@ -35,6 +35,7 @@ Implemented in this foundation pass:
 - sample placeholder sources are explicitly labeled in the dashboard and debug source-health views until live connectors replace them
 - obligations now appear on the dashboard timeline as all-day items, due-soon cards show remaining days, and Storage/Sync preferences expose the actual shared-vs-local file locations and sync mode
 - open apps now reload shared obligations on refresh and watch the shared obligations file timestamp during the existing minute loop so cross-Mac updates can appear without relaunch
+- calendar items are only marked cancelled when the source explicitly reports cancellation, and the dashboard now keeps yesterday visible until 3:00 AM while dimming finished items as complete
 
 Still open after this pass:
 

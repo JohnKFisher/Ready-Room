@@ -10,7 +10,10 @@ struct DashboardView: View {
         let merged = model.normalizedItems + model.dueSoon.filter { obligation in
             model.normalizedItems.contains(where: { $0.id == obligation.id }) == false
         }
-        return merged.filter(\.inclusion.dashboard)
+        return merged.filter { item in
+            item.inclusion.dashboard &&
+            DashboardTimelinePolicy.includes(item, now: model.now)
+        }
     }
 
     private var groupedTimeline: [TimelineDayGroup] {
@@ -176,13 +179,13 @@ struct DashboardView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 ForEach(group.allDayItems) { item in
-                                    TimelineItemView(item: item)
+                                    TimelineItemView(item: item, now: model.now)
                                 }
                             }
                         }
 
                         ForEach(group.scheduledItems) { item in
-                            TimelineItemView(item: item)
+                            TimelineItemView(item: item, now: model.now)
                         }
                     }
                     .padding()
@@ -286,6 +289,9 @@ struct DashboardView: View {
         if calendar.isDateInTomorrow(date) {
             return "Tomorrow — \(formatter.string(from: date))"
         }
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday — \(formatter.string(from: date))"
+        }
         return formatter.string(from: date)
     }
 
@@ -324,23 +330,35 @@ private struct TimelineDayGroup: Identifiable {
 
 private struct TimelineItemView: View {
     let item: NormalizedItem
+    let now: Date
     @State private var hovering = false
+
+    private var isCompleted: Bool {
+        DashboardTimelinePolicy.isCompleted(item, now: now)
+    }
+
+    private var statusText: String? {
+        if item.changeState == .cancelled {
+            return "Cancelled"
+        }
+        if isCompleted {
+            return "Complete"
+        }
+        return item.changeState == .unchanged ? nil : item.changeState.rawValue.capitalized
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(item.isAllDay ? "All Day" : item.startDate?.formattedClock() ?? "TBD")
                     .font(.headline)
+                    .foregroundStyle(isCompleted ? .secondary : .primary)
                 Text(item.title)
                     .font(.headline)
+                    .foregroundStyle(isCompleted ? .secondary : .primary)
                 Spacer()
-                if item.changeState != .unchanged {
-                    Text(item.changeState.rawValue.capitalized)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(ReadyRoomPalette.badgeText)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(ReadyRoomPalette.badgeFill, in: Capsule())
+                if let statusText {
+                    TimelineStatusBadge(text: statusText, appearance: badgeAppearance)
                 }
             }
             Text(item.metadata["calendarTitle"] ?? item.source.displayName)
@@ -360,7 +378,18 @@ private struct TimelineItemView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
         }
+        .opacity(isCompleted ? 0.82 : 1)
         .onHover { hovering = $0 }
+    }
+
+    private var badgeAppearance: TimelineStatusBadge.Appearance {
+        if item.changeState == .cancelled {
+            return .cancelled
+        }
+        if isCompleted {
+            return .complete
+        }
+        return .changed
     }
 }
 
@@ -411,6 +440,75 @@ private struct PlaceholderBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(ReadyRoomPalette.badgeFill, in: Capsule())
+    }
+}
+
+private struct TimelineStatusBadge: View {
+    enum Appearance {
+        case changed
+        case cancelled
+        case complete
+    }
+
+    let text: String
+    let appearance: Appearance
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(backgroundColor, in: Capsule())
+    }
+
+    private var foregroundColor: Color {
+        switch appearance {
+        case .changed, .cancelled:
+            ReadyRoomPalette.badgeText
+        case .complete:
+            Color(nsColor: .systemGreen)
+        }
+    }
+
+    private var backgroundColor: Color {
+        switch appearance {
+        case .changed:
+            ReadyRoomPalette.badgeFill
+        case .cancelled:
+            Color(nsColor: .systemBlue).opacity(0.16)
+        case .complete:
+            Color(nsColor: .systemGreen).opacity(0.14)
+        }
+    }
+}
+
+enum DashboardTimelinePolicy {
+    static func earliestVisibleDay(for now: Date, calendar: Calendar = .readyRoomGregorian) -> Date {
+        let startOfToday = now.startOfDay(in: calendar)
+        let hour = calendar.component(.hour, from: now)
+        return hour < 3 ? startOfToday.adding(days: -1, calendar: calendar) : startOfToday
+    }
+
+    static func includes(_ item: NormalizedItem, now: Date, calendar: Calendar = .readyRoomGregorian) -> Bool {
+        let anchorDate = (item.startDate ?? now).startOfDay(in: calendar)
+        return anchorDate >= earliestVisibleDay(for: now, calendar: calendar)
+    }
+
+    static func isCompleted(_ item: NormalizedItem, now: Date, calendar: Calendar = .readyRoomGregorian) -> Bool {
+        guard item.changeState != .cancelled else {
+            return false
+        }
+        if item.isAllDay {
+            guard let startDate = item.startDate else {
+                return false
+            }
+            return startDate.startOfDay(in: calendar) < now.startOfDay(in: calendar)
+        }
+        guard let endDate = item.endDate else {
+            return false
+        }
+        return endDate < now
     }
 }
 

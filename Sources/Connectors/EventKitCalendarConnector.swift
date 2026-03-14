@@ -22,7 +22,8 @@ public actor EventKitCalendarConnector: SourceConnector {
             )
         }
 
-        let start = Date().startOfDay()
+        let referenceDate = Date()
+        let start = fetchStartDate(for: referenceDate)
         let end = start.adding(days: horizonDays + 1)
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
         let events = store.events(matching: predicate)
@@ -79,5 +80,12 @@ public actor EventKitCalendarConnector: SourceConnector {
         let dayToken = Int(dayAnchor.timeIntervalSince1970)
         let base = event.eventIdentifier ?? event.calendarItemIdentifier
         return "\(event.calendar.calendarIdentifier)|\(base)|\(dayToken)"
+    }
+
+    private func fetchStartDate(for referenceDate: Date) -> Date {
+        let calendar = Calendar.readyRoomGregorian
+        let startOfToday = referenceDate.startOfDay(in: calendar)
+        let hour = calendar.component(.hour, from: referenceDate)
+        return hour < 3 ? startOfToday.adding(days: -1, calendar: calendar) : startOfToday
     }
 }
