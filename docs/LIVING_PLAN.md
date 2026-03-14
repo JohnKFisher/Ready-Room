@@ -46,6 +46,7 @@ Implemented in this foundation pass:
 - generated briefings now carry a prominent early-development warning banner and explicitly label placeholder-derived weather, news, media, and calendar content
 - scheduled-send dedupe now distinguishes manual test sends from scheduled sends, and the Apple Mail sender now emits a readable compatibility-formatted plain-text message instead of literal HTML tags
 - briefing event lines now include explicit dates as well as times so previewed and sent briefings are readable without relying on section context alone
+- `docs/WHERE_WE_STAND.md` now captures the current implemented/partial/missing status and should be regenerated on future major or minor version bumps
 
 Still open after this pass:
 
