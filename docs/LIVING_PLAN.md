@@ -45,6 +45,7 @@ Implemented in this foundation pass:
 - Sender settings are now shared config instead of hardcoded placeholder recipients, with explicit primary-sender designation and fresh regeneration before scheduled morning sends
 - generated briefings now carry a prominent early-development warning banner and explicitly label placeholder-derived weather, news, media, and calendar content
 - scheduled-send dedupe now distinguishes manual test sends from scheduled sends, and the Apple Mail sender now emits a readable compatibility-formatted plain-text message instead of literal HTML tags
+- briefing event lines now include explicit dates as well as times so previewed and sent briefings are readable without relying on section context alone
 
 Still open after this pass:
 

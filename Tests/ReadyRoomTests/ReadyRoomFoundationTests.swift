@@ -171,6 +171,36 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func briefingComposerIncludesDatesInEventLines() {
+        let calendar = Calendar.readyRoomGregorian
+        let item = NormalizedItem(
+            id: "calendar:dated",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendar", type: .calendar),
+            sourceIdentifier: "dated",
+            sourceType: .calendar,
+            title: "Amy - Flight Home",
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 15, hour: 21, minute: 25))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 15, hour: 22, minute: 25))!
+        )
+        let request = BriefingRequest(
+            audience: .john,
+            date: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 6, minute: 30))!,
+            normalizedItems: [item],
+            weather: nil,
+            headlines: [],
+            mediaItems: [],
+            dueSoon: [],
+            preferredMode: .templated
+        )
+        let opening = GeneratedNarrative(text: "Today looks busy.", preferredMode: .templated, actualMode: .templated)
+        let news = GeneratedNarrative(text: "", preferredMode: .templated, actualMode: .templated)
+
+        let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
+
+        #expect(artifact.bodyHTML.contains("Sun, Mar 15 at 9:25"))
+    }
+
+    @Test
     func scheduledSendCoordinatorPreventsDuplicateSends() {
         let coordinator = ScheduledSendCoordinator()
         let calendar = Calendar.readyRoomGregorian

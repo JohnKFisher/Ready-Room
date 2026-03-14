@@ -139,23 +139,10 @@ public struct BriefingComposer: Sendable {
     }
 
     private func makeSection(title: String, items: [NormalizedItem], calendarPlaceholderLabel: String? = nil) -> BriefingSection {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-
         let body = items.map { item -> String in
-            let prefix: String
-            if item.isAllDay {
-                prefix = "All day"
-            } else if let start = item.startDate {
-                prefix = formatter.string(from: start)
-            } else {
-                prefix = ""
-            }
-
             let location = item.location.map { " (\($0))" } ?? ""
             let placeholderPrefix = item.sourceType == .calendar && calendarPlaceholderLabel != nil ? "[Placeholder] " : ""
-            return [prefix, placeholderPrefix + item.title + location]
+            return [formattedItemPrefix(for: item), placeholderPrefix + item.title + location]
                 .filter { !$0.isEmpty }
                 .joined(separator: " — ")
         }
@@ -167,6 +154,24 @@ public struct BriefingComposer: Sendable {
             body: body,
             items: items
         )
+    }
+
+    private func formattedItemPrefix(for item: NormalizedItem) -> String {
+        guard let start = item.startDate else {
+            return item.isAllDay ? "All day" : ""
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "EEE, MMM d"
+
+        if item.isAllDay {
+            return "\(dateFormatter.string(from: start)) — All day"
+        }
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.timeStyle = .short
+        timeFormatter.dateStyle = .none
+        return "\(dateFormatter.string(from: start)) at \(timeFormatter.string(from: start))"
     }
 
     private func renderHTML(request: BriefingRequest, openingLine: String, newsSummary: String, sections: [BriefingSection]) -> String {
