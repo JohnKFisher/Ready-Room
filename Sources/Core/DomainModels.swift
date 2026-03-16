@@ -796,6 +796,102 @@ public enum SendStatus: String, Codable, CaseIterable, Sendable {
     case skippedDuplicate
 }
 
+public enum SenderTransport: String, Codable, CaseIterable, Sendable {
+    case smtp
+    case appleMail = "apple-mail"
+
+    public var displayName: String {
+        switch self {
+        case .smtp:
+            return "SMTP"
+        case .appleMail:
+            return "Apple Mail"
+        }
+    }
+}
+
+public enum SMTPSecurity: String, Codable, CaseIterable, Sendable {
+    case implicitTLS
+    case startTLS
+    case plain
+
+    public var displayName: String {
+        switch self {
+        case .implicitTLS:
+            return "Implicit TLS"
+        case .startTLS:
+            return "STARTTLS"
+        case .plain:
+            return "Plain"
+        }
+    }
+}
+
+public enum SMTPAuthenticationMethod: String, Codable, CaseIterable, Sendable {
+    case automatic
+    case plain
+    case login
+
+    public var displayName: String {
+        switch self {
+        case .automatic:
+            return "Automatic"
+        case .plain:
+            return "PLAIN"
+        case .login:
+            return "LOGIN"
+        }
+    }
+}
+
+public struct SMTPSenderConfiguration: Codable, Sendable, Hashable {
+    public var isEnabled: Bool
+    public var host: String
+    public var port: Int
+    public var security: SMTPSecurity
+    public var username: String
+    public var fromAddress: String
+    public var fromDisplayName: String
+    public var authentication: SMTPAuthenticationMethod
+    public var connectionTimeoutSeconds: Int
+
+    public init(
+        isEnabled: Bool = false,
+        host: String = "",
+        port: Int = 465,
+        security: SMTPSecurity = .implicitTLS,
+        username: String = "",
+        fromAddress: String = "",
+        fromDisplayName: String = "",
+        authentication: SMTPAuthenticationMethod = .automatic,
+        connectionTimeoutSeconds: Int = 20
+    ) {
+        self.isEnabled = isEnabled
+        self.host = host
+        self.port = port
+        self.security = security
+        self.username = username
+        self.fromAddress = fromAddress
+        self.fromDisplayName = fromDisplayName
+        self.authentication = authentication
+        self.connectionTimeoutSeconds = connectionTimeoutSeconds
+    }
+
+    public var isConfigured: Bool {
+        isEnabled &&
+        host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
+        username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
+        fromAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    public var passwordAccountKey: String {
+        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedFromAddress = fromAddress.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return "smtp-password:\(normalizedHost):\(normalizedUsername):\(normalizedFromAddress)"
+    }
+}
+
 public struct SendExecutionRecord: Codable, Sendable, Hashable, Identifiable {
     public var id: UUID
     public var briefingDate: Date
@@ -810,6 +906,10 @@ public struct SendExecutionRecord: Codable, Sendable, Hashable, Identifiable {
     public var completedAt: Date?
     public var dedupeKey: String
     public var errorDescription: String?
+    public var requestedSenderID: String?
+    public var requestedSenderDisplayName: String?
+    public var actualSenderDisplayName: String?
+    public var fallbackDescription: String?
 
     public init(
         id: UUID = UUID(),
@@ -824,7 +924,11 @@ public struct SendExecutionRecord: Codable, Sendable, Hashable, Identifiable {
         createdAt: Date = .now,
         completedAt: Date? = nil,
         dedupeKey: String,
-        errorDescription: String? = nil
+        errorDescription: String? = nil,
+        requestedSenderID: String? = nil,
+        requestedSenderDisplayName: String? = nil,
+        actualSenderDisplayName: String? = nil,
+        fallbackDescription: String? = nil
     ) {
         self.id = id
         self.briefingDate = briefingDate
@@ -839,6 +943,51 @@ public struct SendExecutionRecord: Codable, Sendable, Hashable, Identifiable {
         self.completedAt = completedAt
         self.dedupeKey = dedupeKey
         self.errorDescription = errorDescription
+        self.requestedSenderID = requestedSenderID
+        self.requestedSenderDisplayName = requestedSenderDisplayName
+        self.actualSenderDisplayName = actualSenderDisplayName
+        self.fallbackDescription = fallbackDescription
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case briefingDate
+        case audience
+        case machineIdentifier
+        case senderID
+        case sendMode
+        case status
+        case preferredMode
+        case actualMode
+        case createdAt
+        case completedAt
+        case dedupeKey
+        case errorDescription
+        case requestedSenderID
+        case requestedSenderDisplayName
+        case actualSenderDisplayName
+        case fallbackDescription
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        briefingDate = try container.decode(Date.self, forKey: .briefingDate)
+        audience = try container.decode(BriefingAudience.self, forKey: .audience)
+        machineIdentifier = try container.decode(String.self, forKey: .machineIdentifier)
+        senderID = try container.decode(String.self, forKey: .senderID)
+        sendMode = try container.decodeIfPresent(SendMode.self, forKey: .sendMode)
+        status = try container.decode(SendStatus.self, forKey: .status)
+        preferredMode = try container.decode(NarrativeGenerationMode.self, forKey: .preferredMode)
+        actualMode = try container.decode(NarrativeGenerationMode.self, forKey: .actualMode)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        dedupeKey = try container.decode(String.self, forKey: .dedupeKey)
+        errorDescription = try container.decodeIfPresent(String.self, forKey: .errorDescription)
+        requestedSenderID = try container.decodeIfPresent(String.self, forKey: .requestedSenderID)
+        requestedSenderDisplayName = try container.decodeIfPresent(String.self, forKey: .requestedSenderDisplayName)
+        actualSenderDisplayName = try container.decodeIfPresent(String.self, forKey: .actualSenderDisplayName)
+        fallbackDescription = try container.decodeIfPresent(String.self, forKey: .fallbackDescription)
     }
 }
 
@@ -860,15 +1009,43 @@ public struct SenderSettings: Codable, Sendable, Hashable {
     public var primary: PrimarySenderConfiguration
     public var johnRecipients: [String]
     public var amyRecipients: [String]
+    public var preferredTransport: SenderTransport
+    public var allowAppleMailFallback: Bool
+    public var smtp: SMTPSenderConfiguration
 
     public init(
         primary: PrimarySenderConfiguration = PrimarySenderConfiguration(machineIdentifier: ""),
         johnRecipients: [String] = [],
-        amyRecipients: [String] = []
+        amyRecipients: [String] = [],
+        preferredTransport: SenderTransport = .smtp,
+        allowAppleMailFallback: Bool = true,
+        smtp: SMTPSenderConfiguration = SMTPSenderConfiguration()
     ) {
         self.primary = primary
         self.johnRecipients = johnRecipients
         self.amyRecipients = amyRecipients
+        self.preferredTransport = preferredTransport
+        self.allowAppleMailFallback = allowAppleMailFallback
+        self.smtp = smtp
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case primary
+        case johnRecipients
+        case amyRecipients
+        case preferredTransport
+        case allowAppleMailFallback
+        case smtp
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        primary = try container.decodeIfPresent(PrimarySenderConfiguration.self, forKey: .primary) ?? PrimarySenderConfiguration(machineIdentifier: "")
+        johnRecipients = try container.decodeIfPresent([String].self, forKey: .johnRecipients) ?? []
+        amyRecipients = try container.decodeIfPresent([String].self, forKey: .amyRecipients) ?? []
+        preferredTransport = try container.decodeIfPresent(SenderTransport.self, forKey: .preferredTransport) ?? .smtp
+        allowAppleMailFallback = try container.decodeIfPresent(Bool.self, forKey: .allowAppleMailFallback) ?? true
+        smtp = try container.decodeIfPresent(SMTPSenderConfiguration.self, forKey: .smtp) ?? SMTPSenderConfiguration()
     }
 
     public func recipients(for audience: BriefingAudience) -> [String] {

@@ -343,6 +343,83 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func smtpMessageBuilderCreatesMultipartAlternativeEmail() {
+        let composer = BriefingComposer()
+        let request = BriefingRequest(
+            audience: .john,
+            normalizedItems: [],
+            weather: WeatherSnapshot(summary: "Sunny", currentTemperatureF: 60, highF: 70, lowF: 48),
+            headlines: [NewsHeadline(title: "Markets mixed", sourceName: "AP")],
+            mediaItems: [],
+            dueSoon: [],
+            preferredMode: .templated
+        )
+        let opening = GeneratedNarrative(text: "Today looks busy.", preferredMode: .templated, actualMode: .templated)
+        let news = GeneratedNarrative(text: "Markets mixed", preferredMode: .templated, actualMode: .templated)
+        let artifact = composer.compose(
+            request: request,
+            recipients: ["john@example.com"],
+            openingLine: opening,
+            newsSummary: news
+        )
+        let config = SMTPSenderConfiguration(
+            isEnabled: true,
+            host: "smtp.example.com",
+            port: 465,
+            security: .implicitTLS,
+            username: "readyroom@example.com",
+            fromAddress: "readyroom@example.com",
+            fromDisplayName: "Ready Room"
+        )
+
+        let message = MultipartEmailMessageBuilder(artifact: artifact, configuration: config).build()
+        let wire = String(decoding: message.data, as: UTF8.self)
+        let htmlEncoded = Data(artifact.bodyHTML.utf8).base64EncodedString()
+        let plainEncoded = Data(EmailBodyProjection.plainTextAlternative(for: artifact).utf8).base64EncodedString()
+
+        #expect(wire.contains("multipart/alternative"))
+        #expect(wire.contains("Content-Type: text/plain; charset=\"utf-8\""))
+        #expect(wire.contains("Content-Type: text/html; charset=\"utf-8\""))
+        #expect(wire.contains(String(htmlEncoded.prefix(24))))
+        #expect(wire.contains(String(plainEncoded.prefix(24))))
+        #expect(message.messageID.contains("@smtp.example.com>"))
+    }
+
+    @Test
+    func senderDispatchCoordinatorFallsBackToSecondaryAdapterAndRecordsRequestedVsActualSender() async throws {
+        let coordinator = SenderDispatchCoordinator()
+        let artifact = BriefingArtifact(
+            audience: .john,
+            subject: "Test HTML",
+            recipients: ["john@example.com"],
+            bodyHTML: "<html><body><p>Hello</p></body></html>",
+            sections: [],
+            preferredMode: .templated,
+            actualMode: .templated,
+            sourceSnapshotSummary: [],
+            trace: DecisionTrace(preferredGenerationMode: .templated, actualGenerationMode: .templated)
+        )
+
+        let result = try await coordinator.deliver(
+            artifact: artifact,
+            mode: .scheduled,
+            machineIdentifier: "mac-mini",
+            requestedSenderID: SenderTransport.smtp.rawValue,
+            requestedSenderDisplayName: SenderTransport.smtp.displayName,
+            adapters: [
+                StubSenderAdapter(id: SenderTransport.smtp.rawValue, displayName: SenderTransport.smtp.displayName, failure: NSError(domain: "SMTP", code: 1, userInfo: [NSLocalizedDescriptionKey: "Bad auth."])),
+                StubSenderAdapter(id: SenderTransport.appleMail.rawValue, displayName: SenderTransport.appleMail.displayName)
+            ]
+        )
+
+        #expect(result.record.senderID == SenderTransport.appleMail.rawValue)
+        #expect(result.record.requestedSenderID == SenderTransport.smtp.rawValue)
+        #expect(result.record.requestedSenderDisplayName == SenderTransport.smtp.displayName)
+        #expect(result.record.actualSenderDisplayName == SenderTransport.appleMail.displayName)
+        #expect(result.record.fallbackDescription?.contains("Bad auth.") == true)
+    }
+
+    @Test
     func dictionaryBuilderKeepsLastDuplicateValueInsteadOfCrashing() {
         let dictionary = ReadyRoomCollections.dictionaryLastValueWins(
             from: [
@@ -614,6 +691,74 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func senderSettingsDecodeLegacySharedConfigWithoutSMTPFields() throws {
+        let json = """
+        {
+          "primary": {
+            "machineIdentifier": "mac-mini",
+            "scheduledSendHour": 6,
+            "scheduledSendMinute": 30,
+            "catchUpDeadlineHour": 12
+          },
+          "johnRecipients": ["john@example.com"],
+          "amyRecipients": ["amy@example.com"]
+        }
+        """
+        let decoded = try JSONDecoder().decode(SenderSettings.self, from: Data(json.utf8))
+
+        #expect(decoded.preferredTransport == .smtp)
+        #expect(decoded.allowAppleMailFallback == true)
+        #expect(decoded.smtp == SMTPSenderConfiguration())
+    }
+
+    @Test
+    func senderSettingsStoreRoundTripsSMTPConfiguration() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let coordinator = ReadyRoomStorageCoordinator(
+            localRootOverride: root.appendingPathComponent("LocalRoot", isDirectory: true),
+            sharedRootOverride: root.appendingPathComponent("SharedRoot", isDirectory: true)
+        )
+        let store = SenderSettingsStore(coordinator: coordinator)
+        let saved = SenderSettings(
+            primary: PrimarySenderConfiguration(machineIdentifier: "mac-mini"),
+            johnRecipients: ["john@example.com"],
+            amyRecipients: ["amy@example.com"],
+            preferredTransport: .smtp,
+            allowAppleMailFallback: true,
+            smtp: SMTPSenderConfiguration(
+                isEnabled: true,
+                host: "smtp.example.com",
+                port: 587,
+                security: .startTLS,
+                username: "readyroom@example.com",
+                fromAddress: "readyroom@example.com",
+                fromDisplayName: "Ready Room",
+                authentication: .login,
+                connectionTimeoutSeconds: 25
+            )
+        )
+
+        try await store.save(saved)
+        let loaded = try await store.load()
+
+        #expect(loaded == saved)
+    }
+
+    @Test
+    func keychainSecretStoreSavesLoadsAndDeletesSMTPPassword() async throws {
+        let store = KeychainSecretStore(service: "com.jkfisher.readyroom.tests.\(UUID().uuidString)")
+        let account = "smtp-password:test"
+
+        try await store.save(secret: "app-password-123", account: account)
+        #expect(try await store.load(account: account) == "app-password-123")
+
+        try await store.delete(account: account)
+        #expect(try await store.load(account: account) == nil)
+    }
+
+    @Test
     func weatherSettingsDefaultToPiscatawayZipCode() {
         let settings = WeatherSettings()
 
@@ -674,5 +819,37 @@ struct ReadyRoomFoundationTests {
         #expect(SharedObligationSyncGate.shouldReload(lastSeen: earlier, current: later, force: false))
         #expect(SharedObligationSyncGate.shouldReload(lastSeen: earlier, current: earlier, force: false) == false)
         #expect(SharedObligationSyncGate.shouldReload(lastSeen: nil, current: nil, force: true))
+    }
+}
+
+private struct StubSenderAdapter: SenderAdapter {
+    let id: String
+    let displayName: String
+    var failure: Error?
+
+    init(id: String, displayName: String, failure: Error? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.failure = failure
+    }
+
+    func send(artifact: BriefingArtifact, mode: SendMode, machineIdentifier: String) async throws -> SendExecutionResult {
+        if let failure {
+            throw failure
+        }
+
+        let record = SendExecutionRecord(
+            briefingDate: artifact.generatedAt,
+            audience: artifact.audience,
+            machineIdentifier: machineIdentifier,
+            senderID: id,
+            sendMode: mode,
+            status: mode == .previewOnly ? .pending : .sent,
+            preferredMode: artifact.preferredMode,
+            actualMode: artifact.actualMode,
+            completedAt: mode == .previewOnly ? nil : .now,
+            dedupeKey: "\(artifact.generatedAt.formattedMonthDayWeekday()):\(artifact.audience.rawValue)"
+        )
+        return SendExecutionResult(record: record, messageID: "\(id)-message")
     }
 }

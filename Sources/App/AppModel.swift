@@ -70,6 +70,8 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var debugJSON = ""
     @Published var quietHours = QuietHoursSettings()
     @Published var lastGeneratedPreviewAudience: BriefingAudience = .john
+    @Published var sendRecords: [SendExecutionRecord] = []
+    @Published var smtpPasswordStored = false
 
     private let storageCoordinator = ReadyRoomStorageCoordinator()
     private lazy var layoutStore = DashboardLayoutStore(coordinator: storageCoordinator)
@@ -84,7 +86,9 @@ final class ReadyRoomAppModel: ObservableObject {
     private let rulesEngine = ReadyRoomRulesEngine()
     private let parser = PlainEnglishObligationParser()
     private let sendCoordinator = ScheduledSendCoordinator()
+    private let senderDispatchCoordinator = SenderDispatchCoordinator()
     private let mailSender = AppleMailSenderAdapter()
+    private let keychainSecretStore = KeychainSecretStore()
     private let weatherLocationResolver = AppleLocationSearchResolver()
     private var lastKnownObligationsModifiedAt: Date?
     private var attemptedScheduledSendKeys: Set<String> = []
@@ -102,6 +106,8 @@ final class ReadyRoomAppModel: ObservableObject {
             machineIdentifier = try await machineIdentityStore.loadOrCreate()
             senderSettings = try await senderSettingsStore.load()
             primarySenderConfiguration = senderSettings.primary
+            sendRecords = try await sendRegistryStore.load()
+            await refreshSMTPPasswordStored(for: senderSettings.smtp)
             weatherSettings = try await weatherSettingsStore.load()
             await ensureWeatherSettingsResolvedIfNeeded()
             obligations = try await obligationsStore.load()
@@ -280,9 +286,21 @@ final class ReadyRoomAppModel: ObservableObject {
     func saveSenderSettings(
         johnRecipientsText: String,
         amyRecipientsText: String,
+        preferredTransport: SenderTransport,
+        allowAppleMailFallback: Bool,
         scheduledSendHour: Int,
         scheduledSendMinute: Int,
-        catchUpDeadlineHour: Int
+        catchUpDeadlineHour: Int,
+        smtpIsEnabled: Bool,
+        smtpHost: String,
+        smtpPort: Int,
+        smtpSecurity: SMTPSecurity,
+        smtpUsername: String,
+        smtpFromAddress: String,
+        smtpFromDisplayName: String,
+        smtpAuthentication: SMTPAuthenticationMethod,
+        smtpConnectionTimeoutSeconds: Int,
+        smtpPassword: String
     ) async {
         var settings = senderSettings
         settings.primary.scheduledSendHour = scheduledSendHour
@@ -290,7 +308,39 @@ final class ReadyRoomAppModel: ObservableObject {
         settings.primary.catchUpDeadlineHour = catchUpDeadlineHour
         settings.johnRecipients = parseRecipients(from: johnRecipientsText)
         settings.amyRecipients = parseRecipients(from: amyRecipientsText)
-        await persistSenderSettings(settings, status: "Saved sender settings.")
+        settings.preferredTransport = preferredTransport
+        settings.allowAppleMailFallback = allowAppleMailFallback
+        settings.smtp = SMTPSenderConfiguration(
+            isEnabled: smtpIsEnabled,
+            host: smtpHost.trimmingCharacters(in: .whitespacesAndNewlines),
+            port: smtpPort,
+            security: smtpSecurity,
+            username: smtpUsername.trimmingCharacters(in: .whitespacesAndNewlines),
+            fromAddress: smtpFromAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+            fromDisplayName: smtpFromDisplayName.trimmingCharacters(in: .whitespacesAndNewlines),
+            authentication: smtpAuthentication,
+            connectionTimeoutSeconds: smtpConnectionTimeoutSeconds
+        )
+
+        do {
+            let trimmedPassword = smtpPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedPassword.isEmpty == false {
+                try await keychainSecretStore.save(secret: trimmedPassword, account: settings.smtp.passwordAccountKey)
+            }
+            await persistSenderSettings(settings, status: "Saved sender settings.")
+        } catch {
+            statusMessage = "Could not save SMTP credentials: \(error.localizedDescription)"
+        }
+    }
+
+    func clearStoredSMTPPassword() async {
+        do {
+            try await keychainSecretStore.delete(account: senderSettings.smtp.passwordAccountKey)
+            await refreshSMTPPasswordStored(for: senderSettings.smtp)
+            statusMessage = "Cleared the stored SMTP password for this Mac."
+        } catch {
+            statusMessage = "Could not clear the stored SMTP password: \(error.localizedDescription)"
+        }
     }
 
     func makeThisMacPrimarySender() async {
@@ -427,9 +477,9 @@ final class ReadyRoomAppModel: ObservableObject {
         let artifacts = audiences.compactMap { artifact(for: $0, mode: preferredMode) ?? artifact(for: $0, mode: .templated) }
         for artifact in artifacts {
             do {
-                let result = try await performSend(artifact: artifact, mode: .manualTest, adapters: [mailSender])
-                try await sendRegistryStore.append(result.record)
-                statusMessage = "Sent \(artifact.audience.displayName) briefing."
+                let result = try await performSend(artifact: artifact, mode: .manualTest)
+                try await recordSendResult(result)
+                statusMessage = successStatusMessage(for: result, audience: artifact.audience, action: "Sent")
             } catch {
                 statusMessage = "Send failed for \(artifact.audience.displayName): \(error.localizedDescription)"
             }
@@ -572,7 +622,9 @@ final class ReadyRoomAppModel: ObservableObject {
             snapshots: sourceSnapshots,
             normalizedItems: normalizedItems,
             dueSoon: dueSoon,
-            conflicts: conflicts
+            conflicts: conflicts,
+            senderSettings: senderSettings,
+            sendRecords: sendRecords
         )
         if let data = try? encoder.encode(payload), let json = String(data: data, encoding: .utf8) {
             debugJSON = json
@@ -608,37 +660,29 @@ final class ReadyRoomAppModel: ObservableObject {
             }
 
             do {
-                let result = try await performSend(artifact: artifact, mode: .scheduled, adapters: [mailSender])
-                try await sendRegistryStore.append(result.record)
-                statusMessage = "Scheduled send completed for \(audience.displayName)."
+                let result = try await performSend(artifact: artifact, mode: .scheduled)
+                try await recordSendResult(result)
+                statusMessage = successStatusMessage(for: result, audience: audience, action: "Scheduled send completed")
             } catch {
                 statusMessage = "Scheduled send failed for \(audience.displayName): \(error.localizedDescription)"
             }
         }
     }
 
-    private func performSend(artifact: BriefingArtifact, mode: SendMode, adapters: [SenderAdapter]) async throws -> SendExecutionResult {
+    private func performSend(artifact: BriefingArtifact, mode: SendMode) async throws -> SendExecutionResult {
         guard artifact.recipients.isEmpty == false else {
             throw NSError(domain: "ReadyRoomSend", code: 1, userInfo: [NSLocalizedDescriptionKey: "No recipients are configured for \(artifact.audience.displayName)."])
         }
-        guard let primary = adapters.first else {
-            throw NSError(domain: "ReadyRoomSend", code: 0, userInfo: [NSLocalizedDescriptionKey: "No sender configured."])
-        }
-
-        do {
-            return try await primary.send(artifact: artifact, mode: mode, machineIdentifier: machineIdentifier)
-        } catch {
-            if mode == .scheduled {
-                do {
-                    return try await primary.send(artifact: artifact, mode: mode, machineIdentifier: machineIdentifier)
-                } catch {
-                    for fallback in adapters.dropFirst() {
-                        return try await fallback.send(artifact: artifact, mode: mode, machineIdentifier: machineIdentifier)
-                    }
-                }
-            }
-            throw error
-        }
+        let plan = try await sendPlan()
+        return try await senderDispatchCoordinator.deliver(
+            artifact: artifact,
+            mode: mode,
+            machineIdentifier: machineIdentifier,
+            requestedSenderID: plan.requestedSenderID,
+            requestedSenderDisplayName: plan.requestedSenderDisplayName,
+            adapters: plan.adapters,
+            initialFallbackDescription: plan.initialFallbackDescription
+        )
     }
 
     private func refreshBriefingsForScheduledSend() async {
@@ -657,7 +701,9 @@ final class ReadyRoomAppModel: ObservableObject {
             senderSettings = settings
             primarySenderConfiguration = settings.primary
             attemptedScheduledSendKeys.removeAll()
+            await refreshSMTPPasswordStored(for: settings.smtp)
             await generateNarrativesAndPreviews()
+            updateDebugJSON()
             statusMessage = status
         } catch {
             statusMessage = "Could not save sender settings: \(error.localizedDescription)"
@@ -670,6 +716,99 @@ final class ReadyRoomAppModel: ObservableObject {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.isEmpty == false }
     }
+
+    private func sendPlan() async throws -> SendPlan {
+        switch senderSettings.preferredTransport {
+        case .appleMail:
+            return SendPlan(
+                requestedSenderID: SenderTransport.appleMail.rawValue,
+                requestedSenderDisplayName: SenderTransport.appleMail.displayName,
+                adapters: [mailSender],
+                initialFallbackDescription: nil
+            )
+        case .smtp:
+            let config = senderSettings.smtp
+            let password = try await keychainSecretStore.load(account: config.passwordAccountKey)
+            if config.isConfigured, let password, password.isEmpty == false {
+                var adapters: [SenderAdapter] = [SMTPSenderAdapter(configuration: config, password: password)]
+                if senderSettings.allowAppleMailFallback {
+                    adapters.append(mailSender)
+                }
+                return SendPlan(
+                    requestedSenderID: SenderTransport.smtp.rawValue,
+                    requestedSenderDisplayName: SenderTransport.smtp.displayName,
+                    adapters: adapters,
+                    initialFallbackDescription: nil
+                )
+            }
+
+            let reason = unavailableSMTPReason(configuration: config, password: password)
+            guard senderSettings.allowAppleMailFallback else {
+                throw NSError(domain: "ReadyRoomSend", code: 4, userInfo: [NSLocalizedDescriptionKey: reason])
+            }
+
+            return SendPlan(
+                requestedSenderID: SenderTransport.smtp.rawValue,
+                requestedSenderDisplayName: SenderTransport.smtp.displayName,
+                adapters: [mailSender],
+                initialFallbackDescription: reason
+            )
+        }
+    }
+
+    private func unavailableSMTPReason(configuration: SMTPSenderConfiguration, password: String?) -> String {
+        var problems: [String] = []
+        if configuration.isEnabled == false {
+            problems.append("SMTP is turned off in Sender settings.")
+        }
+        if configuration.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            problems.append("SMTP host is missing.")
+        }
+        if configuration.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            problems.append("SMTP username is missing.")
+        }
+        if configuration.fromAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            problems.append("SMTP from address is missing.")
+        }
+        if password?.isEmpty != false {
+            problems.append("No SMTP password is stored on this Mac.")
+        }
+
+        let joined = problems.isEmpty ? "SMTP is not ready on this Mac." : problems.joined(separator: " ")
+        return "\(joined) Ready Room used Apple Mail compatibility mode instead."
+    }
+
+    private func refreshSMTPPasswordStored(for configuration: SMTPSenderConfiguration) async {
+        let hasKeyMaterial = configuration.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
+        configuration.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
+        configuration.fromAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+
+        guard hasKeyMaterial else {
+            smtpPasswordStored = false
+            return
+        }
+
+        do {
+            let secret = try await keychainSecretStore.load(account: configuration.passwordAccountKey)
+            smtpPasswordStored = secret?.isEmpty == false
+        } catch {
+            smtpPasswordStored = false
+        }
+    }
+
+    private func recordSendResult(_ result: SendExecutionResult) async throws {
+        try await sendRegistryStore.append(result.record)
+        sendRecords = try await sendRegistryStore.load()
+        updateDebugJSON()
+    }
+
+    private func successStatusMessage(for result: SendExecutionResult, audience: BriefingAudience, action: String) -> String {
+        let actualSender = result.record.actualSenderDisplayName ?? result.record.senderID
+        if let fallbackDescription = result.record.fallbackDescription, fallbackDescription.isEmpty == false {
+            return "\(action) for \(audience.displayName) via \(actualSender). \(fallbackDescription)"
+        }
+        return "\(action) for \(audience.displayName) via \(actualSender)."
+    }
 }
 
 private struct DebugPayload: Encodable {
@@ -678,6 +817,15 @@ private struct DebugPayload: Encodable {
     let normalizedItems: [NormalizedItem]
     let dueSoon: [NormalizedItem]
     let conflicts: [ConflictMarker]
+    let senderSettings: SenderSettings
+    let sendRecords: [SendExecutionRecord]
+}
+
+private struct SendPlan {
+    let requestedSenderID: String
+    let requestedSenderDisplayName: String
+    let adapters: [SenderAdapter]
+    let initialFallbackDescription: String?
 }
 
 private enum DevelopmentData {

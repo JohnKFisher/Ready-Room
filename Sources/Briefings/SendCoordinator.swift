@@ -1,9 +1,7 @@
 import AppKit
 import Foundation
-import OSAKit
 import ReadyRoomCore
 import ReadyRoomPersistence
-import ScriptingBridge
 
 public struct ScheduledSendCoordinator: Sendable {
     public init() {}
@@ -130,50 +128,7 @@ public struct AppleMailSenderAdapter: SenderAdapter {
         This briefing was sent as plain text for reliable rendering in Apple Mail automation.
 
         """
-        let convertedBody = plainText(fromHTML: artifact.bodyHTML) ?? fallbackPlainText(from: artifact)
-        return compatibilityNote + normalizePlainText(convertedBody)
-    }
-
-    private func plainText(fromHTML html: String) -> String? {
-        let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
-            .documentType: NSAttributedString.DocumentType.html,
-            .characterEncoding: String.Encoding.utf8.rawValue
-        ]
-        guard let data = html.data(using: .utf8),
-              let attributed = try? NSAttributedString(data: data, options: options, documentAttributes: nil) else {
-            return nil
-        }
-        return attributed.string
-    }
-
-    private func fallbackPlainText(from artifact: BriefingArtifact) -> String {
-        var lines = [artifact.subject, ""]
-        for section in artifact.sections {
-            lines.append(section.title)
-            lines.append(stripHTML(from: section.body))
-            lines.append("")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    private func stripHTML(from html: String) -> String {
-        html
-            .replacingOccurrences(of: "<br\\s*/?>", with: "\n", options: .regularExpression)
-            .replacingOccurrences(of: "</p>", with: "\n\n", options: .regularExpression)
-            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-    }
-
-    private func normalizePlainText(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .replacingOccurrences(of: "\u{00A0}", with: " ")
-            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return compatibilityNote + EmailBodyProjection.plainTextAlternative(for: artifact)
     }
 }
 

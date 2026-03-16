@@ -2,9 +2,11 @@ import Foundation
 import Security
 
 public actor KeychainSecretStore {
-    private let service = "com.jkfisher.readyroom"
+    private let service: String
 
-    public init() {}
+    public init(service: String = "com.jkfisher.readyroom") {
+        self.service = service
+    }
 
     public func save(secret: String, account: String) throws {
         let data = Data(secret.utf8)
@@ -40,5 +42,17 @@ public actor KeychainSecretStore {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
         return String(data: data, encoding: .utf8)
+    }
+
+    public func delete(account: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
     }
 }

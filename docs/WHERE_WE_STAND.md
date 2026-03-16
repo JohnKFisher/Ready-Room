@@ -48,12 +48,14 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - briefings include a strong early-development warning banner
 
 ### Sending / Scheduling
-- Apple Mail send path exists
+- SMTP HTML send path exists
+- Apple Mail compatibility fallback exists
 - scheduled-send coordination exists
 - primary sender selection exists
 - same-day catch-up window exists
 - manual test sends no longer block the real scheduled send for the same day
-- sent messages now arrive as readable plain-text compatibility mail instead of raw HTML tags
+- sent messages can now go out as multipart HTML+plain-text mail when SMTP is configured
+- send history now records requested-versus-actual sender path when fallback occurs
 
 ### Storage / Multi-Mac
 - clear local-vs-shared storage boundary
@@ -79,6 +81,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 ### Settings / Preferences
 - the sidebar structure exists
 - sender, storage/sync, and weather are meaningfully usable
+- sender settings now include SMTP server details, sender selection, and local Keychain-backed password status
 - most other settings pages are still placeholders or explanatory shells
 
 ### Debuggability
@@ -119,8 +122,6 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 ### Sending / Delivery
 - true rendered HTML email delivery through Mail
-- additional sender methods
-- sender fallback methods
 - richer delivery diagnostics and error recovery UX
 
 ### Operational Hardening
@@ -133,7 +134,8 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - News and media may still be placeholder data unless explicitly wired to live sources.
 - Weather now has a live path, but it depends on Apple location resolution succeeding and Open-Meteo being reachable.
 - Foundation Models is not really implemented yet.
-- Apple Mail currently sends a readable plain-text compatibility version, not a fully rendered HTML email.
+- SMTP delivery currently assumes username/app-password style auth; OAuth-specific provider flows are not implemented.
+- Apple Mail still sends the readable plain-text compatibility version, not a fully rendered HTML email, when fallback is used.
 - Scheduled sending is improved, but still not fully proven as “trust it every morning without checking.”
 - Much of Settings is still scaffold/UI shell rather than finished product.
 - Notifications are not implemented, so the app will not proactively warn you about important changes yet.
@@ -143,8 +145,9 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 To get useful daily behavior right now:
 - macOS app must be running on the chosen primary sender Mac
-- Apple Mail must be configured and able to send mail
-- Apple Events/Mail automation permission must be granted
+- if you want HTML email, SMTP server details must be configured and an SMTP password must be stored locally in this Mac's Keychain
+- if you want Apple Mail fallback, Apple Mail must be configured and able to send mail
+- if you want Apple Mail fallback, Apple Events/Mail automation permission must be granted
 - Calendar permission must be granted for live EventKit calendars
 - if using cross-Mac sync, each Mac should point Ready Room at its own local path to the same synced folder
 - if using scheduled sends, real John and Amy recipient lists must be configured
@@ -152,6 +155,7 @@ To get useful daily behavior right now:
 ## Important Operational Risks
 
 - Morning send reliability is better than before, but still needs more real-world validation.
+- SMTP setup is partly shared and partly local: host/user/from settings sync, but each Mac needs its own local Keychain password.
 - Cross-Mac coordination is practical, not fully hardened.
 - Placeholder data can still leak into daily use for news and media because those connectors are not fully configured yet.
 - Some configuration areas exist in the data model but not yet in a real user-facing workflow.

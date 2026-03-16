@@ -29,7 +29,7 @@ Implemented in this foundation pass:
 - file-based shared/local storage scaffolding, YAML obligations store, Keychain-backed secrets, and send/archive stores
 - connector scaffolding for EventKit, weather, news, and Plex-family services
 - deterministic briefing composer with preferred-vs-actual AI mode disclosure
-- sender abstraction, scheduled-send coordination logic, and an Apple Mail sender implementation path
+- sender abstraction, scheduled-send coordination logic, an SMTP HTML sender path, and an Apple Mail compatibility fallback path
 - SwiftUI app shell for dashboard, preview, obligations, settings, and debug flows
 - obligations editor now supports post-parse field edits, inline explanation editing, and click-to-edit for saved items
 - sample placeholder sources are explicitly labeled in the dashboard and debug source-health views until live connectors replace them
@@ -42,9 +42,9 @@ Implemented in this foundation pass:
 - obligation occurrences now use the same carry-yesterday-until-3:00-AM day boundary as the timeline, so late-night recurring items stay attached to the expected day group
 - multi-day all-day events now appear on each day they cover in the timeline instead of only their start day, and they are only marked complete after their final covered day
 - Storage/Sync now supports a machine-local custom shared folder so different Macs can point Ready Room at different absolute Resilio Sync paths without syncing the path setting itself
-- Sender settings are now shared config instead of hardcoded placeholder recipients, with explicit primary-sender designation and fresh regeneration before scheduled morning sends
+- Sender settings are now shared config instead of hardcoded placeholder recipients, with explicit primary-sender designation, SMTP configuration, Keychain-backed per-Mac SMTP passwords, and fresh regeneration before scheduled morning sends
 - generated briefings now carry a prominent early-development warning banner and explicitly label placeholder-derived weather, news, media, and calendar content
-- scheduled-send dedupe now distinguishes manual test sends from scheduled sends, and the Apple Mail sender now emits a readable compatibility-formatted plain-text message instead of literal HTML tags
+- scheduled-send dedupe now distinguishes manual test sends from scheduled sends, SMTP delivery now emits multipart plain-text-plus-HTML mail, and Apple Mail remains a readable compatibility fallback instead of receiving raw HTML tags
 - briefing event lines now include explicit dates as well as times so previewed and sent briefings are readable without relying on section context alone
 - Weather now has a real shared configuration screen: it defaults to ZIP `08854`, resolves ZIP or city/state input through Apple location search, fetches live conditions from Open-Meteo, and shows an SF Symbol in the dashboard instead of sample placeholder weather
 - `docs/WHERE_WE_STAND.md` now captures the current implemented/partial/missing status and should be regenerated on future major or minor version bumps
@@ -55,6 +55,7 @@ Still open after this pass:
 - production-grade Foundation Models prompt integration
 - full setup wizard persistence and permissions UX
 - app bundling/signing refinement and runtime smoke-testing against real local services
+- OAuth-grade SMTP auth and broader provider-specific setup guidance beyond basic username/app-password flows
 
 ## Decisions Log
 
@@ -67,5 +68,5 @@ Still open after this pass:
 ## Risks And Follow-Ups
 
 - Foundation Models integration is intentionally wrapped behind a provider boundary because the deterministic fallback must remain the trustworthy path.
-- Apple Mail automation will require runtime Apple Events authorization and real-machine testing before it should be trusted for scheduled sending.
+- SMTP HTML delivery now depends on each sending Mac having a valid local Keychain password and provider-compatible SMTP settings; Apple Mail automation remains the plain-text fallback path when SMTP is unavailable or fails.
 - iCloud shared storage and duplicate-send protection must be validated with two Macs before the scheduler is considered production-safe.

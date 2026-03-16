@@ -406,17 +406,58 @@ private struct SenderSettingsView: View {
     @ObservedObject var model: ReadyRoomAppModel
     @State private var johnRecipientsText = ""
     @State private var amyRecipientsText = ""
+    @State private var preferredTransport: SenderTransport = .smtp
+    @State private var allowAppleMailFallback = true
     @State private var scheduledSendHour = 6
     @State private var scheduledSendMinute = 30
     @State private var catchUpDeadlineHour = 12
+    @State private var smtpIsEnabled = false
+    @State private var smtpHost = ""
+    @State private var smtpPort = 465
+    @State private var smtpSecurity: SMTPSecurity = .implicitTLS
+    @State private var smtpUsername = ""
+    @State private var smtpFromAddress = ""
+    @State private var smtpFromDisplayName = ""
+    @State private var smtpAuthentication: SMTPAuthenticationMethod = .automatic
+    @State private var smtpConnectionTimeoutSeconds = 20
+    @State private var smtpPassword = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Sender")
                     .font(.headline)
-                Text("Apple Mail is the active sender path. Configure the real recipient lists here, then make this Mac the primary scheduled sender if this is the machine that should send the 6:30 AM briefings.")
+                Text("Ready Room can now send multipart HTML mail over SMTP and fall back to Apple Mail compatibility mode when needed. SMTP server details are shared across Macs, while the SMTP password stays only in this Mac's Keychain.")
                     .foregroundStyle(.secondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Delivery Path")
+                    .font(.headline)
+                Picker("Preferred Sender", selection: $preferredTransport) {
+                    ForEach(SenderTransport.allCases, id: \.self) { transport in
+                        Text(transport.displayName).tag(transport)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Toggle("Allow Apple Mail fallback if SMTP is unavailable or fails", isOn: $allowAppleMailFallback)
+                    .disabled(preferredTransport == .appleMail)
+
+                if preferredTransport == .smtp {
+                    if model.smtpPasswordStored {
+                        Text("SMTP is preferred. This Mac currently has an SMTP password stored in Keychain.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("SMTP is preferred, but this Mac still needs an SMTP password saved locally before unattended HTML sends can work.")
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Text("Apple Mail remains the active sender path. That path sends a readable plain-text compatibility version rather than full HTML.")
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -446,6 +487,90 @@ private struct SenderSettingsView: View {
                         Task { await model.clearPrimarySender() }
                     }
                     .disabled(model.primarySenderConfiguration.machineIdentifier.isEmpty)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("SMTP HTML Sender")
+                    .font(.headline)
+                Toggle("Enable SMTP HTML delivery", isOn: $smtpIsEnabled)
+                Text("Use the mailbox account you want Ready Room to send from. If the account uses MFA, this usually needs an app password rather than your normal sign-in.")
+                    .foregroundStyle(.secondary)
+
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Host")
+                        TextField("smtp.example.com", text: $smtpHost)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    GridRow {
+                        Text("Port")
+                        Stepper("\(smtpPort)", value: $smtpPort, in: 1...65535)
+                    }
+                    GridRow {
+                        Text("Security")
+                        Picker("Security", selection: $smtpSecurity) {
+                            ForEach(SMTPSecurity.allCases, id: \.self) { security in
+                                Text(security.displayName).tag(security)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    GridRow {
+                        Text("Auth")
+                        Picker("Authentication", selection: $smtpAuthentication) {
+                            ForEach(SMTPAuthenticationMethod.allCases, id: \.self) { method in
+                                Text(method.displayName).tag(method)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    GridRow {
+                        Text("Username")
+                        TextField("username@example.com", text: $smtpUsername)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    GridRow {
+                        Text("From Email")
+                        TextField("readyroom@example.com", text: $smtpFromAddress)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    GridRow {
+                        Text("From Name")
+                        TextField("Ready Room", text: $smtpFromDisplayName)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    GridRow {
+                        Text("Timeout")
+                        Stepper("\(smtpConnectionTimeoutSeconds) seconds", value: $smtpConnectionTimeoutSeconds, in: 5...60)
+                    }
+                }
+
+                SecureField("SMTP app password (leave blank to keep the current stored password)", text: $smtpPassword)
+                    .textFieldStyle(.roundedBorder)
+
+                if model.smtpPasswordStored {
+                    Text("Stored locally on this Mac: SMTP password is present in Keychain.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No SMTP password is stored locally on this Mac yet.")
+                        .foregroundStyle(.orange)
+                }
+
+                HStack {
+                    Button("Clear Stored SMTP Password") {
+                        Task { await model.clearStoredSMTPPassword() }
+                    }
+                    .disabled(model.smtpPasswordStored == false)
+
+                    if smtpIsEnabled && preferredTransport == .smtp && (smtpHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || smtpUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || smtpFromAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                        Text("Host, username, and from email are required for SMTP.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
             .padding()
@@ -503,10 +628,23 @@ private struct SenderSettingsView: View {
                         await model.saveSenderSettings(
                             johnRecipientsText: johnRecipientsText,
                             amyRecipientsText: amyRecipientsText,
+                            preferredTransport: preferredTransport,
+                            allowAppleMailFallback: allowAppleMailFallback,
                             scheduledSendHour: scheduledSendHour,
                             scheduledSendMinute: scheduledSendMinute,
-                            catchUpDeadlineHour: catchUpDeadlineHour
+                            catchUpDeadlineHour: catchUpDeadlineHour,
+                            smtpIsEnabled: smtpIsEnabled,
+                            smtpHost: smtpHost,
+                            smtpPort: smtpPort,
+                            smtpSecurity: smtpSecurity,
+                            smtpUsername: smtpUsername,
+                            smtpFromAddress: smtpFromAddress,
+                            smtpFromDisplayName: smtpFromDisplayName,
+                            smtpAuthentication: smtpAuthentication,
+                            smtpConnectionTimeoutSeconds: smtpConnectionTimeoutSeconds,
+                            smtpPassword: smtpPassword
                         )
+                        smtpPassword = ""
                     }
                 }
             }
@@ -523,9 +661,21 @@ private struct SenderSettingsView: View {
     private func loadFromModel() {
         johnRecipientsText = model.senderSettings.johnRecipients.joined(separator: ", ")
         amyRecipientsText = model.senderSettings.amyRecipients.joined(separator: ", ")
+        preferredTransport = model.senderSettings.preferredTransport
+        allowAppleMailFallback = model.senderSettings.allowAppleMailFallback
         scheduledSendHour = model.senderSettings.primary.scheduledSendHour
         scheduledSendMinute = model.senderSettings.primary.scheduledSendMinute
         catchUpDeadlineHour = model.senderSettings.primary.catchUpDeadlineHour
+        smtpIsEnabled = model.senderSettings.smtp.isEnabled
+        smtpHost = model.senderSettings.smtp.host
+        smtpPort = model.senderSettings.smtp.port
+        smtpSecurity = model.senderSettings.smtp.security
+        smtpUsername = model.senderSettings.smtp.username
+        smtpFromAddress = model.senderSettings.smtp.fromAddress
+        smtpFromDisplayName = model.senderSettings.smtp.fromDisplayName
+        smtpAuthentication = model.senderSettings.smtp.authentication
+        smtpConnectionTimeoutSeconds = model.senderSettings.smtp.connectionTimeoutSeconds
+        smtpPassword = ""
     }
 }
 
