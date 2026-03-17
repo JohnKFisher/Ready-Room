@@ -4,15 +4,23 @@ import ReadyRoomCore
 
 struct AudienceAccentRail: View {
     let accent: ItemAudienceAccent
+    private let segmentHeight: CGFloat = 11
+    private let segmentSpacing: CGFloat = 1
+
+    private var railHeight: CGFloat {
+        let count = max(accent.tokens.count, 1)
+        return (CGFloat(count) * segmentHeight) + (CGFloat(count - 1) * segmentSpacing)
+    }
 
     var body: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: segmentSpacing) {
             ForEach(accent.tokens) { token in
                 Rectangle()
                     .fill(Color(readyRoomHex: token.hex, fallback: .secondaryLabelColor))
+                    .frame(height: segmentHeight)
             }
         }
-        .frame(width: 6)
+        .frame(width: 6, height: railHeight, alignment: .top)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay {
             RoundedRectangle(cornerRadius: 4)
