@@ -31,6 +31,37 @@ struct AudienceAccentRail: View {
     }
 }
 
+struct AudienceAccentFillRail: View {
+    let accent: ItemAudienceAccent
+    private let railWidth: CGFloat = 10
+    private let segmentSpacing: CGFloat = 1
+
+    var body: some View {
+        GeometryReader { proxy in
+            let segmentCount = max(accent.tokens.count, 1)
+            let totalSpacing = CGFloat(segmentCount - 1) * segmentSpacing
+            let segmentHeight = max((proxy.size.height - totalSpacing) / CGFloat(segmentCount), 0)
+
+            VStack(spacing: segmentSpacing) {
+                ForEach(accent.tokens) { token in
+                    Rectangle()
+                        .fill(Color(readyRoomHex: token.hex, fallback: .secondaryLabelColor))
+                        .frame(height: segmentHeight)
+                }
+            }
+            .frame(width: railWidth, height: proxy.size.height, alignment: .top)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+            }
+        }
+        .frame(width: railWidth)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accent.tokens.map(\.label).joined(separator: ", "))
+    }
+}
+
 struct AudiencePillRow: View {
     let accent: ItemAudienceAccent
     var compact = false

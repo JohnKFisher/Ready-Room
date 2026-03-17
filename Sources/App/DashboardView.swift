@@ -393,60 +393,59 @@ private struct TimelineItemView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AudienceAccentRail(accent: accent)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(item.isAllDay ? "All Day" : item.startDate?.formattedClock() ?? "TBD")
-                        .font(.headline)
-                        .foregroundStyle(isCompleted ? .secondary : .primary)
-                    Text(item.title)
-                        .font(.headline)
-                        .foregroundStyle(isCompleted ? .secondary : .primary)
-                    Spacer()
-                    if let statusText {
-                        TimelineStatusBadge(text: statusText, appearance: badgeAppearance)
-                    }
-                }
-                Text(item.metadata["calendarTitle"] ?? item.source.displayName)
-                    .foregroundStyle(.secondary)
-                HStack(alignment: .center, spacing: 10) {
-                    AudiencePillRow(accent: accent, compact: true)
-                    if let detailText {
-                        Button {
-                            showingDetails = true
-                        } label: {
-                            Label("Details", systemImage: "ellipsis.circle")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.07 : 0.10), in: Capsule())
-                                .overlay {
-                                    Capsule()
-                                        .stroke(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(0.18), lineWidth: 1)
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
-                            TimelineItemDetailPopover(
-                                title: item.title,
-                                sourceName: item.metadata["calendarTitle"] ?? item.source.displayName,
-                                detailText: detailText,
-                                accentHex: accent.primaryHex
-                            )
-                        }
-                        .help("Show more details")
-                    }
-                }
-                if let location = item.location {
-                    Text(location)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(item.isAllDay ? "All Day" : item.startDate?.formattedClock() ?? "TBD")
+                    .font(.headline)
+                    .foregroundStyle(isCompleted ? .secondary : .primary)
+                Text(item.title)
+                    .font(.headline)
+                    .foregroundStyle(isCompleted ? .secondary : .primary)
+                Spacer()
+                if let statusText {
+                    TimelineStatusBadge(text: statusText, appearance: badgeAppearance)
                 }
             }
+            Text(item.metadata["calendarTitle"] ?? item.source.displayName)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 10) {
+                AudiencePillRow(accent: accent, compact: true)
+                if let detailText {
+                    Button {
+                        showingDetails = true
+                    } label: {
+                        Label("Details", systemImage: "ellipsis.circle")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.07 : 0.10), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(0.18), lineWidth: 1)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
+                        TimelineItemDetailPopover(
+                            title: item.title,
+                            sourceName: item.metadata["calendarTitle"] ?? item.source.displayName,
+                            detailText: detailText,
+                            accentHex: accent.primaryHex
+                        )
+                    }
+                    .help("Show more details")
+                }
+            }
+            if let location = item.location {
+                Text(location)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding()
+        .padding(.top, 14)
+        .padding(.bottom, 14)
+        .padding(.leading, 36)
+        .padding(.trailing, 14)
         .background {
             RoundedRectangle(cornerRadius: 14)
                 .fill(ReadyRoomPalette.itemSurface)
@@ -454,6 +453,11 @@ private struct TimelineItemView: View {
                     RoundedRectangle(cornerRadius: 14)
                         .fill(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.05 : 0.08))
                 }
+        }
+        .overlay(alignment: .leading) {
+            AudienceAccentFillRail(accent: accent)
+                .padding(.leading, 12)
+                .padding(.vertical, 14)
         }
         .overlay {
             RoundedRectangle(cornerRadius: 14)
