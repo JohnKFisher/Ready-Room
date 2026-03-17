@@ -8,7 +8,7 @@ struct RootContentView: View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 List(ReadyRoomAppModel.Screen.allCases, selection: $model.selectedScreen) { screen in
-                    Label(screen.rawValue.capitalized, systemImage: icon(for: screen))
+                    Label(screen.title, systemImage: icon(for: screen))
                         .tag(screen)
                 }
                 .frame(minWidth: 200)
@@ -50,7 +50,7 @@ struct RootContentView: View {
                 Button("Refresh") {
                     Task { await model.refresh() }
                 }
-                Button("Preview") {
+                Button("Briefing") {
                     model.selectedScreen = .preview
                 }
                 Button("Send Now") {

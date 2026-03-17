@@ -14,6 +14,16 @@ final class ReadyRoomAppModel: ObservableObject {
         case debug
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .dashboard: "Dashboard"
+            case .preview: "Briefing"
+            case .obligations: "Obligations"
+            case .settings: "Settings"
+            case .debug: "Debug"
+            }
+        }
     }
 
     enum PreferencesSection: String, CaseIterable, Identifiable {

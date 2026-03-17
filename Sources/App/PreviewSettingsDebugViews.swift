@@ -32,9 +32,9 @@ struct PreviewView: View {
                     }
                 }
             } else if let artifact = model.artifact(for: selectedAudience, mode: model.preferredMode) ?? model.artifact(for: selectedAudience, mode: .templated) {
-                ArtifactCard(title: "Final Preview", artifact: artifact)
+                ArtifactCard(title: "Briefing", artifact: artifact)
             } else {
-                ContentUnavailableView("No Preview Yet", systemImage: "envelope.badge")
+                ContentUnavailableView("No Briefing Yet", systemImage: "envelope.badge")
             }
         }
         .padding(24)
@@ -259,7 +259,7 @@ struct SettingsView: View {
                     case .calendars:
                         settingsCard("Calendars", body: "EventKit-first calendar discovery, role confirmation, and include/exclude controls.")
                     case .briefings:
-                        settingsCard("Briefings", body: "Recipient lists, preview-only mode, and section behavior will be configured here.")
+                        settingsCard("Briefings", body: "Recipient lists, briefing-only mode, and section behavior will be configured here.")
                     case .dashboard:
                         settingsCard("Dashboard", body: "Card order is local per Mac. Quiet hours currently default to 11:00 PM to 6:00 AM.")
                     case .obligations:
@@ -277,7 +277,7 @@ struct SettingsView: View {
                     case .sender:
                         SenderSettingsView(model: model)
                     case .advancedDebug:
-                        settingsCard("Advanced/Debug", body: "Use the Debug screen for raw data inspection, source health, and preview traces.")
+                        settingsCard("Advanced/Debug", body: "Use the Debug screen for raw data inspection, source health, and briefing traces.")
                     }
                 }
                 .padding(24)
