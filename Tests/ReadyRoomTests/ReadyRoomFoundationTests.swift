@@ -202,6 +202,43 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func briefingComposerIncludesAudienceChipsInMarkup() {
+        let calendar = Calendar.readyRoomGregorian
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendar", type: .calendar)
+        let item = NormalizedItem(
+            id: "calendar:pickup",
+            source: source,
+            sourceIdentifier: "pickup",
+            sourceType: .calendar,
+            title: "School pickup",
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 15, minute: 0))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 16, minute: 0))!,
+            relevantPeople: [.john, .amy]
+        )
+        let request = BriefingRequest(
+            audience: .john,
+            date: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 6, minute: 30))!,
+            normalizedItems: [item],
+            weather: nil,
+            headlines: [],
+            mediaItems: [],
+            dueSoon: [],
+            preferredMode: .templated
+        )
+        let opening = GeneratedNarrative(text: "Today looks busy.", preferredMode: .templated, actualMode: .templated)
+        let news = GeneratedNarrative(text: "", preferredMode: .templated, actualMode: .templated)
+
+        let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
+        let plainText = EmailBodyProjection.plainTextAlternative(for: artifact)
+
+        #expect(artifact.bodyHTML.contains(">J<"))
+        #expect(artifact.bodyHTML.contains(">A<"))
+        #expect(artifact.bodyHTML.contains("#3478F6"))
+        #expect(artifact.bodyHTML.contains("#39A96B"))
+        #expect(plainText.contains("School pickup"))
+    }
+
+    @Test
     func briefingComposerUsesTodayTomorrowAndUpcomingDaySections() {
         let calendar = Calendar.readyRoomGregorian
         let source = SourceDescriptor(id: "calendar", displayName: "Calendar", type: .calendar)
@@ -786,6 +823,124 @@ struct ReadyRoomFoundationTests {
             "calendar:upcoming-1",
             "calendar:upcoming-2"
         ])
+    }
+
+    @Test
+    func personColorPaletteDefaultsMatchDesignPalette() {
+        let palette = PersonColorPaletteSettings.default
+
+        #expect(palette.johnHex == "#3478F6")
+        #expect(palette.amyHex == "#39A96B")
+        #expect(palette.ellieHex == "#B58AF7")
+        #expect(palette.miaHex == "#7ECFFF")
+    }
+
+    @Test
+    func personColorPaletteResetReturnsToDefaults() {
+        var palette = PersonColorPaletteSettings(
+            johnHex: "#000000",
+            amyHex: "#111111",
+            ellieHex: "#222222",
+            miaHex: "#333333"
+        )
+
+        palette.resetToDefaults()
+
+        #expect(palette == .default)
+    }
+
+    @Test
+    func personColorPaletteStoreRoundTripsSettings() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let coordinator = ReadyRoomStorageCoordinator(
+            localRootOverride: root.appendingPathComponent("LocalRoot", isDirectory: true),
+            sharedRootOverride: root.appendingPathComponent("SharedRoot", isDirectory: true)
+        )
+        let store = PersonColorPaletteSettingsStore(coordinator: coordinator)
+        let saved = PersonColorPaletteSettings(
+            johnHex: "#112233",
+            amyHex: "#445566",
+            ellieHex: "#778899",
+            miaHex: "#AABBCC"
+        )
+
+        try await store.save(saved)
+        let loaded = try await store.load()
+
+        #expect(loaded == saved)
+    }
+
+    @Test
+    func audienceAccentResolverReturnsSingleNamedPerson() {
+        let accent = ItemAudienceAccentResolver.resolve(
+            owner: .john,
+            relevantPeople: [.john],
+            palette: .default
+        )
+
+        #expect(accent.tokens.map(\.label) == ["John"])
+        #expect(accent.primaryHex == "#3478F6")
+        #expect(accent.isNeutralFallback == false)
+    }
+
+    @Test
+    func audienceAccentResolverKeepsTwoPeopleInStableOrder() {
+        let accent = ItemAudienceAccentResolver.resolve(
+            owner: nil,
+            relevantPeople: [.amy, .john],
+            palette: .default
+        )
+
+        #expect(accent.tokens.map(\.label) == ["John", "Amy"])
+        #expect(accent.tokens.map(\.hex) == ["#3478F6", "#39A96B"])
+    }
+
+    @Test
+    func audienceAccentResolverPlacesOwnerFirstForThreeOrMorePeople() {
+        let accent = ItemAudienceAccentResolver.resolve(
+            owner: .amy,
+            relevantPeople: [.john, .amy, .ellie],
+            palette: .default
+        )
+
+        #expect(accent.tokens.map(\.label) == ["Amy", "John", "Ellie"])
+        #expect(accent.primaryHex == "#39A96B")
+    }
+
+    @Test
+    func audienceAccentResolverIgnoresFamilyWhenNamedPeopleExist() {
+        let accent = ItemAudienceAccentResolver.resolve(
+            owner: nil,
+            relevantPeople: [.family, .john, .mia],
+            palette: .default
+        )
+
+        #expect(accent.tokens.map(\.label) == ["John", "Mia"])
+        #expect(accent.tokens.contains(where: { $0.label == "Family" }) == false)
+        #expect(accent.isNeutralFallback == false)
+    }
+
+    @Test
+    func audienceAccentResolverUsesNeutralFallbackForFamilyOrUnresolved() {
+        let familyAccent = ItemAudienceAccentResolver.resolve(
+            owner: nil,
+            relevantPeople: [.family],
+            palette: .default
+        )
+        let generalAccent = ItemAudienceAccentResolver.resolve(
+            owner: nil,
+            relevantPeople: [],
+            palette: .default
+        )
+
+        #expect(familyAccent.tokens.map(\.label) == ["Family"])
+        #expect(familyAccent.primaryHex == ItemAudienceAccentResolver.neutralHex)
+        #expect(familyAccent.isNeutralFallback)
+        #expect(generalAccent.tokens.map(\.label) == ["General"])
+        #expect(generalAccent.primaryHex == ItemAudienceAccentResolver.neutralHex)
+        #expect(generalAccent.isNeutralFallback)
     }
 
     @Test

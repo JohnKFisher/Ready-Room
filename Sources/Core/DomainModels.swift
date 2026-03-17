@@ -681,6 +681,7 @@ public struct BriefingRequest: Codable, Sendable, Hashable {
     public var mediaItems: [MediaActivity]
     public var dueSoon: [NormalizedItem]
     public var preferredMode: NarrativeGenerationMode
+    public var personColorPalette: PersonColorPaletteSettings
     public var calendarPlaceholderLabel: String?
     public var weatherPlaceholderLabel: String?
     public var newsPlaceholderLabel: String?
@@ -695,6 +696,7 @@ public struct BriefingRequest: Codable, Sendable, Hashable {
         mediaItems: [MediaActivity],
         dueSoon: [NormalizedItem],
         preferredMode: NarrativeGenerationMode,
+        personColorPalette: PersonColorPaletteSettings = .default,
         calendarPlaceholderLabel: String? = nil,
         weatherPlaceholderLabel: String? = nil,
         newsPlaceholderLabel: String? = nil,
@@ -708,6 +710,7 @@ public struct BriefingRequest: Codable, Sendable, Hashable {
         self.mediaItems = mediaItems
         self.dueSoon = dueSoon
         self.preferredMode = preferredMode
+        self.personColorPalette = personColorPalette
         self.calendarPlaceholderLabel = calendarPlaceholderLabel
         self.weatherPlaceholderLabel = weatherPlaceholderLabel
         self.newsPlaceholderLabel = newsPlaceholderLabel

@@ -291,18 +291,18 @@ struct DashboardView: View {
     private func timelineDayGroupContent(_ dayGroup: DashboardTimelineDayGroup) -> some View {
         if !dayGroup.allDayItems.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("All Day")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                ForEach(dayGroup.allDayItems) { item in
-                    TimelineItemView(item: item, now: model.now)
-                }
-            }
-        }
+                                Text("All Day")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ForEach(dayGroup.allDayItems) { item in
+                                    TimelineItemView(item: item, now: model.now, palette: model.personColorPaletteSettings)
+                                }
+                            }
+                        }
 
-        ForEach(dayGroup.scheduledItems) { item in
-            TimelineItemView(item: item, now: model.now)
-        }
+                        ForEach(dayGroup.scheduledItems) { item in
+                            TimelineItemView(item: item, now: model.now, palette: model.personColorPaletteSettings)
+                        }
     }
 
     private func dueSoonDetail(for item: NormalizedItem) -> String {
@@ -353,10 +353,15 @@ struct DashboardTimelinePlacement {
 private struct TimelineItemView: View {
     let item: NormalizedItem
     let now: Date
+    let palette: PersonColorPaletteSettings
     @State private var hovering = false
 
     private var isCompleted: Bool {
         DashboardTimelinePolicy.isCompleted(item, now: now)
+    }
+
+    private var accent: ItemAudienceAccent {
+        ItemAudienceAccentResolver.resolve(for: item, palette: palette)
     }
 
     private var statusText: String? {
@@ -381,32 +386,44 @@ private struct TimelineItemView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(item.isAllDay ? "All Day" : item.startDate?.formattedClock() ?? "TBD")
-                    .font(.headline)
-                    .foregroundStyle(isCompleted ? .secondary : .primary)
-                Text(item.title)
-                    .font(.headline)
-                    .foregroundStyle(isCompleted ? .secondary : .primary)
-                Spacer()
-                if let statusText {
-                    TimelineStatusBadge(text: statusText, appearance: badgeAppearance)
+        HStack(alignment: .top, spacing: 12) {
+            AudienceAccentRail(accent: accent)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(item.isAllDay ? "All Day" : item.startDate?.formattedClock() ?? "TBD")
+                        .font(.headline)
+                        .foregroundStyle(isCompleted ? .secondary : .primary)
+                    Text(item.title)
+                        .font(.headline)
+                        .foregroundStyle(isCompleted ? .secondary : .primary)
+                    Spacer()
+                    if let statusText {
+                        TimelineStatusBadge(text: statusText, appearance: badgeAppearance)
+                    }
                 }
-            }
-            Text(item.metadata["calendarTitle"] ?? item.source.displayName)
-                .foregroundStyle(.secondary)
-            if let location = item.location {
-                Text(location)
+                Text(item.metadata["calendarTitle"] ?? item.source.displayName)
                     .foregroundStyle(.secondary)
-            }
-            if hovering, let notes = item.notes, !notes.isEmpty {
-                Text(notes)
-                    .font(.subheadline)
+                AudiencePillRow(accent: accent, compact: true)
+                if let location = item.location {
+                    Text(location)
+                        .foregroundStyle(.secondary)
+                }
+                if hovering, let notes = item.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(.subheadline)
+                }
             }
         }
         .padding()
-        .background(ReadyRoomPalette.itemSurface, in: RoundedRectangle(cornerRadius: 14))
+        .background {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(ReadyRoomPalette.itemSurface)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.05 : 0.08))
+                }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)

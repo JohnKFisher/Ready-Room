@@ -65,26 +65,26 @@ public struct BriefingComposer: Sendable {
 
         let today = items(on: dayBuckets.today, from: relevant, calendar: calendar)
         if !today.isEmpty {
-            sections.append(makeSection(title: "Today", items: today, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+            sections.append(makeSection(title: "Today", items: today, palette: request.personColorPalette, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         let tomorrow = items(on: dayBuckets.tomorrow, from: relevant, calendar: calendar)
         if !tomorrow.isEmpty {
-            sections.append(makeSection(title: "Tomorrow", items: tomorrow, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+            sections.append(makeSection(title: "Tomorrow", items: tomorrow, palette: request.personColorPalette, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         let upcoming = items(onAnyOf: dayBuckets.upcoming, from: relevant, calendar: calendar)
         if !upcoming.isEmpty {
-            sections.append(makeSection(title: "Upcoming", items: upcoming, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+            sections.append(makeSection(title: "Upcoming", items: upcoming, palette: request.personColorPalette, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         if !request.dueSoon.isEmpty {
-            sections.append(makeSection(title: "Due Soon", items: request.dueSoon))
+            sections.append(makeSection(title: "Due Soon", items: request.dueSoon, palette: request.personColorPalette))
         }
 
         let changed = relevant.filter { $0.changeState != .unchanged }
         if !changed.isEmpty {
-            sections.append(makeSection(title: "New or Changed", items: changed, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+            sections.append(makeSection(title: "New or Changed", items: changed, palette: request.personColorPalette, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         if !request.headlines.isEmpty {
@@ -141,13 +141,19 @@ public struct BriefingComposer: Sendable {
         }
     }
 
-    private func makeSection(title: String, items: [NormalizedItem], calendarPlaceholderLabel: String? = nil) -> BriefingSection {
+    private func makeSection(
+        title: String,
+        items: [NormalizedItem],
+        palette: PersonColorPaletteSettings,
+        calendarPlaceholderLabel: String? = nil
+    ) -> BriefingSection {
         let body = items.map { item -> String in
             let location = item.location.map { " (\($0))" } ?? ""
             let placeholderPrefix = item.sourceType == .calendar && calendarPlaceholderLabel != nil ? "[Placeholder] " : ""
-            return [formattedItemPrefix(for: item), placeholderPrefix + item.title + location]
+            let content = [formattedItemPrefix(for: item), placeholderPrefix + item.title + location]
                 .filter { !$0.isEmpty }
                 .joined(separator: " — ")
+            return briefingAccentMarkup(for: item, palette: palette) + escapeHTML(content)
         }
         .joined(separator: "<br/>")
 
@@ -206,10 +212,10 @@ public struct BriefingComposer: Sendable {
                     Ready Room is in very, very early development. This email may contain placeholder data or incorrect classifications and should not be trusted or relied on.
                 </div>
                 <header style="margin-bottom: 24px;">
-                    <p style="font-size: 14px; margin: 0 0 8px 0; color: #52606d;">\(request.date.formattedMonthDayWeekday())</p>
-                    <h1 style="font-size: 22px; margin: 0 0 8px 0;">Good morning, \(request.audience.displayName).</h1>
+                    <p style="font-size: 14px; margin: 0 0 8px 0; color: #52606d;">\(escapeHTML(request.date.formattedMonthDayWeekday()))</p>
+                    <h1 style="font-size: 22px; margin: 0 0 8px 0;">Good morning, \(escapeHTML(request.audience.displayName)).</h1>
                     <p style="font-size: 15px; margin: 0 0 8px 0;">\(weather)</p>
-                    <p style="font-size: 15px; margin: 0;">\(openingLine)</p>
+                    <p style="font-size: 15px; margin: 0;">\(escapeHTML(openingLine))</p>
                 </header>
                 \(sectionHTML)
                 \(fallbackDisclosure)
@@ -217,6 +223,16 @@ public struct BriefingComposer: Sendable {
         </body>
         </html>
         """
+    }
+
+    private func briefingAccentMarkup(for item: NormalizedItem, palette: PersonColorPaletteSettings) -> String {
+        let accent = ItemAudienceAccentResolver.resolve(for: item, palette: palette)
+        let pills = accent.tokens.map { token in
+            """
+            <span style="display: inline-block; margin: 0 4px 4px 0; padding: 1px 7px; border-radius: 999px; border: 1px solid \(token.hex)44; background: \(token.hex)22; color: #253041; font-size: 11px; font-weight: 600;">\(escapeHTML(token.shortLabel))</span>
+            """
+        }.joined()
+        return "<span style=\"display: inline-block; margin-right: 4px; white-space: nowrap;\">\(pills)</span>"
     }
 
     private func sourceSummary(request: BriefingRequest) -> [String] {
@@ -241,6 +257,14 @@ public struct BriefingComposer: Sendable {
     }
 
     private func placeholderNotice(label: String) -> String {
-        "<strong>[Placeholder]</strong> \(label)"
+        "<strong>[Placeholder]</strong> \(escapeHTML(label))"
+    }
+
+    private func escapeHTML(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 }

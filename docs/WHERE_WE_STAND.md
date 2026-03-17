@@ -23,12 +23,13 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - decision-trace structures for inspectability
 
 ### Dashboard
-- 7-day style timeline with grouped days
+- 5-day timeline with `Today`, `Tomorrow`, and grouped `Upcoming` days
 - yesterday remains visible until about 3:00 AM
 - completed items from the current day are dimmed and marked complete
 - multi-day all-day events show on each day they span
 - obligations appear in the timeline as all-day items
 - due-soon card shows remaining days
+- timeline items now show subtle person-based accent rails and pills for John, Amy, Ellie, and Mia
 - placeholder data is clearly labeled in the dashboard and debug views
 
 ### Obligations
@@ -45,6 +46,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - compare-modes preview works
 - placeholder items are clearly labeled in the briefing
 - every event line now includes an explicit date
+- briefing item rows now include subtle person chips using the shared audience-color palette
 - briefings include a strong early-development warning banner
 
 ### Sending / Scheduling
@@ -81,6 +83,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 ### Settings / Preferences
 - the sidebar structure exists
 - sender, storage/sync, and weather are meaningfully usable
+- dashboard settings now include shared person-color customization with a live preview and reset-to-defaults control
 - sender settings now include SMTP server details, sender selection, and local Keychain-backed password status
 - most other settings pages are still placeholders or explanatory shells
 
@@ -159,6 +162,7 @@ To get useful daily behavior right now:
 - Cross-Mac coordination is practical, not fully hardened.
 - Placeholder data can still leak into daily use for news and media because those connectors are not fully configured yet.
 - Some configuration areas exist in the data model but not yet in a real user-facing workflow.
+- Person-based audience colors are configurable now, but the broader calendar management and override UI is still incomplete.
 
 ## Recommended Next Priorities
 
@@ -166,7 +170,7 @@ To get useful daily behavior right now:
 2. Improve sender reliability and diagnostics so morning-send failures are obvious and recoverable.
 3. Build the real setup wizard and permissions guidance.
 4. Add notifications and archive/history UI.
-5. Finish the most important settings pages, especially calendars and briefings.
+5. Finish the most important settings pages, especially calendars and the remaining briefing controls.
 
 ## Latest Durable Rollback Point
 

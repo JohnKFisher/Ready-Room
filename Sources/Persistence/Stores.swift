@@ -109,6 +109,24 @@ public actor WeatherSettingsStore {
     }
 }
 
+public actor PersonColorPaletteSettingsStore {
+    private let coordinator: ReadyRoomStorageCoordinator
+    private let path = "Shared/person-color-palette.json"
+
+    public init(coordinator: ReadyRoomStorageCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    public func load() async throws -> PersonColorPaletteSettings {
+        let stored = try await coordinator.loadJSON(PersonColorPaletteSettings.self, relativePath: path, scope: .shared) ?? PersonColorPaletteSettings.default
+        return stored.normalized()
+    }
+
+    public func save(_ settings: PersonColorPaletteSettings) async throws {
+        try await coordinator.saveJSON(settings.normalized(), relativePath: path, scope: .shared)
+    }
+}
+
 public actor SetupProgressStore {
     private let coordinator: ReadyRoomStorageCoordinator
     private let path = "Local/setup-progress.json"

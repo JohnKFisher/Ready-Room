@@ -261,7 +261,7 @@ struct SettingsView: View {
                     case .briefings:
                         settingsCard("Briefings", body: "Recipient lists, briefing-only mode, and section behavior will be configured here.")
                     case .dashboard:
-                        settingsCard("Dashboard", body: "Card order is local per Mac. Quiet hours currently default to 11:00 PM to 6:00 AM.")
+                        DashboardSettingsView(model: model)
                     case .obligations:
                         settingsCard("Obligations", body: "YAML-backed obligations and the parse/approve workflow are available from the Obligations screen.")
                     case .ai:
@@ -323,6 +323,115 @@ struct SettingsView: View {
         case .advancedDebug:
             "ladybug"
         }
+    }
+}
+
+private struct DashboardSettingsView: View {
+    @ObservedObject var model: ReadyRoomAppModel
+    @State private var johnColor = Color(readyRoomHex: PersonColorPaletteSettings.defaultJohnHex, fallback: .systemBlue)
+    @State private var amyColor = Color(readyRoomHex: PersonColorPaletteSettings.defaultAmyHex, fallback: .systemGreen)
+    @State private var ellieColor = Color(readyRoomHex: PersonColorPaletteSettings.defaultEllieHex, fallback: .systemPurple)
+    @State private var miaColor = Color(readyRoomHex: PersonColorPaletteSettings.defaultMiaHex, fallback: .systemTeal)
+
+    private var draftPalette: PersonColorPaletteSettings {
+        PersonColorPaletteSettings(
+            johnHex: nsColor(from: johnColor)?.readyRoomHexString ?? PersonColorPaletteSettings.defaultJohnHex,
+            amyHex: nsColor(from: amyColor)?.readyRoomHexString ?? PersonColorPaletteSettings.defaultAmyHex,
+            ellieHex: nsColor(from: ellieColor)?.readyRoomHexString ?? PersonColorPaletteSettings.defaultEllieHex,
+            miaHex: nsColor(from: miaColor)?.readyRoomHexString ?? PersonColorPaletteSettings.defaultMiaHex
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Dashboard")
+                    .font(.headline)
+                Text("Audience colors are shared across Macs and also appear in briefing previews and sends. Dashboard card order remains local per Mac.")
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("People Colors")
+                    .font(.headline)
+
+                ColorPicker("John", selection: $johnColor, supportsOpacity: false)
+                ColorPicker("Amy", selection: $amyColor, supportsOpacity: false)
+                ColorPicker("Ellie", selection: $ellieColor, supportsOpacity: false)
+                ColorPicker("Mia", selection: $miaColor, supportsOpacity: false)
+
+                HStack {
+                    Button("Save Audience Colors") {
+                        Task { await model.savePersonColorPalette(draftPalette) }
+                    }
+                    Button("Reset to Defaults") {
+                        syncFromPalette(.default)
+                        Task { await model.resetPersonColorPaletteToDefaults() }
+                    }
+                }
+
+                Text(model.personColorPaletteStatusMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let paletteError = model.personColorPaletteError {
+                    Text(paletteError)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Live Preview")
+                    .font(.headline)
+
+                AudienceAccentPreviewCard(
+                    title: "John solo",
+                    subtitle: "Home Office",
+                    accent: ItemAudienceAccentResolver.resolve(owner: .john, relevantPeople: [.john], palette: draftPalette)
+                )
+                AudienceAccentPreviewCard(
+                    title: "School pickup",
+                    subtitle: "John + Amy",
+                    accent: ItemAudienceAccentResolver.resolve(owner: nil, relevantPeople: [.john, .amy], palette: draftPalette)
+                )
+                AudienceAccentPreviewCard(
+                    title: "Band concert",
+                    subtitle: "John + Amy + Ellie",
+                    accent: ItemAudienceAccentResolver.resolve(owner: nil, relevantPeople: [.john, .amy, .ellie], palette: draftPalette)
+                )
+                AudienceAccentPreviewCard(
+                    title: "Family admin",
+                    subtitle: "Neutral fallback",
+                    accent: ItemAudienceAccentResolver.resolve(owner: nil, relevantPeople: [.family], palette: draftPalette)
+                )
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .onAppear {
+            syncFromPalette(model.personColorPaletteSettings)
+        }
+        .onChange(of: model.personColorPaletteSettings) { _, newValue in
+            syncFromPalette(newValue)
+        }
+    }
+
+    private func syncFromPalette(_ palette: PersonColorPaletteSettings) {
+        johnColor = Color(readyRoomHex: palette.johnHex, fallback: .systemBlue)
+        amyColor = Color(readyRoomHex: palette.amyHex, fallback: .systemGreen)
+        ellieColor = Color(readyRoomHex: palette.ellieHex, fallback: .systemPurple)
+        miaColor = Color(readyRoomHex: palette.miaHex, fallback: .systemTeal)
+    }
+
+    private func nsColor(from color: Color) -> NSColor? {
+        let nsColor = NSColor(color)
+        return nsColor.usingColorSpace(.deviceRGB) ?? nsColor
     }
 }
 

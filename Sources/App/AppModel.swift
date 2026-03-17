@@ -74,6 +74,9 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var weatherSettings = WeatherSettings()
     @Published var weatherSettingsStatusMessage = "Weather uses Apple location lookup and Open-Meteo forecasts."
     @Published var weatherSettingsError: String?
+    @Published var personColorPaletteSettings = PersonColorPaletteSettings.default
+    @Published var personColorPaletteStatusMessage = "Audience colors are shared across Macs and used in the dashboard and briefings."
+    @Published var personColorPaletteError: String?
     @Published var storagePreferences = StoragePreferences()
     @Published var storageStatus: StorageStatus?
     @Published var storageStatusError: String?
@@ -92,6 +95,7 @@ final class ReadyRoomAppModel: ObservableObject {
     private lazy var sendRegistryStore = SendRegistryStore(coordinator: storageCoordinator)
     private lazy var senderSettingsStore = SenderSettingsStore(coordinator: storageCoordinator)
     private lazy var weatherSettingsStore = WeatherSettingsStore(coordinator: storageCoordinator)
+    private lazy var personColorPaletteStore = PersonColorPaletteSettingsStore(coordinator: storageCoordinator)
     private lazy var machineIdentityStore = MachineIdentityStore(coordinator: storageCoordinator)
     private let rulesEngine = ReadyRoomRulesEngine()
     private let parser = PlainEnglishObligationParser()
@@ -119,6 +123,7 @@ final class ReadyRoomAppModel: ObservableObject {
             sendRecords = try await sendRegistryStore.load()
             await refreshSMTPPasswordStored(for: senderSettings.smtp)
             weatherSettings = try await weatherSettingsStore.load()
+            personColorPaletteSettings = try await personColorPaletteStore.load()
             await ensureWeatherSettingsResolvedIfNeeded()
             obligations = try await obligationsStore.load()
             lastKnownObligationsModifiedAt = try await obligationsStore.modificationDate()
@@ -132,6 +137,7 @@ final class ReadyRoomAppModel: ObservableObject {
     func refresh() async {
         statusMessage = quietHours.isActive(at: now) ? "Quiet hours active." : "Refreshing sources..."
         await syncWeatherSettingsFromStore()
+        await syncPersonColorPaletteFromStore()
         _ = await syncSharedObligations(force: true)
         let snapshots = await collectSnapshots()
         sourceSnapshots = snapshots
@@ -293,6 +299,32 @@ final class ReadyRoomAppModel: ObservableObject {
         }
     }
 
+    func savePersonColorPalette(_ settings: PersonColorPaletteSettings) async {
+        let normalized = settings.normalized()
+        do {
+            try await personColorPaletteStore.save(normalized)
+            personColorPaletteSettings = normalized
+            personColorPaletteError = nil
+            personColorPaletteStatusMessage = "Saved audience colors. These colors sync across Macs and update briefings too."
+            await refreshStorageStatus()
+            await generateNarrativesAndPreviews()
+            updateDebugJSON()
+            statusMessage = "Saved dashboard audience colors."
+        } catch {
+            personColorPaletteError = error.localizedDescription
+            personColorPaletteStatusMessage = "Audience colors were not changed."
+            statusMessage = "Could not save audience colors: \(error.localizedDescription)"
+        }
+    }
+
+    func resetPersonColorPaletteToDefaults() async {
+        await savePersonColorPalette(.default)
+        if personColorPaletteError == nil {
+            personColorPaletteStatusMessage = "Reset audience colors to the default palette."
+            statusMessage = "Reset audience colors to defaults."
+        }
+    }
+
     func saveSenderSettings(
         johnRecipientsText: String,
         amyRecipientsText: String,
@@ -398,6 +430,20 @@ final class ReadyRoomAppModel: ObservableObject {
         } catch {
             weatherSettingsError = "Could not load weather settings: \(error.localizedDescription)"
             weatherSettingsStatusMessage = "Weather settings need attention."
+        }
+    }
+
+    private func syncPersonColorPaletteFromStore() async {
+        do {
+            let latestSettings = try await personColorPaletteStore.load()
+            if latestSettings != personColorPaletteSettings {
+                personColorPaletteSettings = latestSettings
+            }
+            personColorPaletteError = nil
+            personColorPaletteStatusMessage = "Audience colors are shared across Macs and used in the dashboard and briefings."
+        } catch {
+            personColorPaletteError = error.localizedDescription
+            personColorPaletteStatusMessage = "Audience colors need attention."
         }
     }
 
@@ -591,6 +637,7 @@ final class ReadyRoomAppModel: ObservableObject {
                     mediaItems: mediaItems,
                     dueSoon: dueSoon.filter { audience == .john ? $0.inclusion.johnBriefing : $0.inclusion.amyBriefing },
                     preferredMode: mode,
+                    personColorPalette: personColorPaletteSettings,
                     calendarPlaceholderLabel: placeholderLabel(for: .calendar),
                     weatherPlaceholderLabel: placeholderLabel(for: .weather),
                     newsPlaceholderLabel: placeholderLabel(for: .news),
@@ -633,6 +680,7 @@ final class ReadyRoomAppModel: ObservableObject {
             normalizedItems: normalizedItems,
             dueSoon: dueSoon,
             conflicts: conflicts,
+            personColorPalette: personColorPaletteSettings,
             senderSettings: senderSettings,
             sendRecords: sendRecords
         )
@@ -697,6 +745,7 @@ final class ReadyRoomAppModel: ObservableObject {
 
     private func refreshBriefingsForScheduledSend() async {
         await syncWeatherSettingsFromStore()
+        await syncPersonColorPaletteFromStore()
         _ = await syncSharedObligations(force: true)
         let snapshots = await collectSnapshots()
         sourceSnapshots = snapshots
@@ -827,6 +876,7 @@ private struct DebugPayload: Encodable {
     let normalizedItems: [NormalizedItem]
     let dueSoon: [NormalizedItem]
     let conflicts: [ConflictMarker]
+    let personColorPalette: PersonColorPaletteSettings
     let senderSettings: SenderSettings
     let sendRecords: [SendExecutionRecord]
 }
