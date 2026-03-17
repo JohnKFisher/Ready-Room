@@ -354,7 +354,7 @@ private struct TimelineItemView: View {
     let item: NormalizedItem
     let now: Date
     let palette: PersonColorPaletteSettings
-    @State private var hovering = false
+    @State private var showingDetails = false
 
     private var isCompleted: Bool {
         DashboardTimelinePolicy.isCompleted(item, now: now)
@@ -362,6 +362,13 @@ private struct TimelineItemView: View {
 
     private var accent: ItemAudienceAccent {
         ItemAudienceAccentResolver.resolve(for: item, palette: palette)
+    }
+
+    private var detailText: String? {
+        guard let notes = item.notes?.trimmingCharacters(in: .whitespacesAndNewlines), notes.isEmpty == false else {
+            return nil
+        }
+        return notes
     }
 
     private var statusText: String? {
@@ -404,14 +411,38 @@ private struct TimelineItemView: View {
                 }
                 Text(item.metadata["calendarTitle"] ?? item.source.displayName)
                     .foregroundStyle(.secondary)
-                AudiencePillRow(accent: accent, compact: true)
+                HStack(alignment: .center, spacing: 10) {
+                    AudiencePillRow(accent: accent, compact: true)
+                    if let detailText {
+                        Button {
+                            showingDetails = true
+                        } label: {
+                            Label("Details", systemImage: "ellipsis.circle")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.07 : 0.10), in: Capsule())
+                                .overlay {
+                                    Capsule()
+                                        .stroke(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(0.18), lineWidth: 1)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
+                            TimelineItemDetailPopover(
+                                title: item.title,
+                                sourceName: item.metadata["calendarTitle"] ?? item.source.displayName,
+                                detailText: detailText,
+                                accentHex: accent.primaryHex
+                            )
+                        }
+                        .help("Show more details")
+                    }
+                }
                 if let location = item.location {
                     Text(location)
                         .foregroundStyle(.secondary)
-                }
-                if hovering, let notes = item.notes, !notes.isEmpty {
-                    Text(notes)
-                        .font(.subheadline)
                 }
             }
         }
@@ -429,7 +460,6 @@ private struct TimelineItemView: View {
                 .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
         }
         .opacity(isCompleted ? 0.82 : 1)
-        .onHover { hovering = $0 }
     }
 
     private var badgeAppearance: TimelineStatusBadge.Appearance {
@@ -440,6 +470,37 @@ private struct TimelineItemView: View {
             return .complete
         }
         return .changed
+    }
+}
+
+private struct TimelineItemDetailPopover: View {
+    let title: String
+    let sourceName: String
+    let detailText: String
+    let accentHex: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle()
+                    .fill(Color(readyRoomHex: accentHex, fallback: .secondaryLabelColor))
+                    .frame(width: 10, height: 10)
+                Text("More Details")
+                    .font(.headline)
+            }
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(sourceName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Divider()
+            Text(detailText)
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .padding(14)
+        .frame(width: 300, alignment: .leading)
     }
 }
 
