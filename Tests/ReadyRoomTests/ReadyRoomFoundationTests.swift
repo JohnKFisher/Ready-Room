@@ -202,6 +202,83 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func briefingComposerUsesTodayTomorrowAndUpcomingDaySections() {
+        let calendar = Calendar.readyRoomGregorian
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendar", type: .calendar)
+        let requestDate = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 6, minute: 30))!
+        let items = [
+            NormalizedItem(
+                id: "calendar:today",
+                source: source,
+                sourceIdentifier: "today",
+                sourceType: .calendar,
+                title: "School pickup",
+                startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 15, minute: 0))!,
+                endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 16, minute: 0))!
+            ),
+            NormalizedItem(
+                id: "calendar:tomorrow",
+                source: source,
+                sourceIdentifier: "tomorrow",
+                sourceType: .calendar,
+                title: "Dentist",
+                startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 15, hour: 9, minute: 0))!,
+                endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 15, hour: 10, minute: 0))!
+            ),
+            NormalizedItem(
+                id: "calendar:upcoming-1",
+                source: source,
+                sourceIdentifier: "upcoming-1",
+                sourceType: .calendar,
+                title: "Project review",
+                startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 16, hour: 11, minute: 0))!,
+                endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 16, hour: 12, minute: 0))!
+            ),
+            NormalizedItem(
+                id: "calendar:upcoming-2",
+                source: source,
+                sourceIdentifier: "upcoming-2",
+                sourceType: .calendar,
+                title: "Band concert",
+                startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 18, hour: 19, minute: 0))!,
+                endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 18, hour: 20, minute: 0))!
+            ),
+            NormalizedItem(
+                id: "calendar:excluded",
+                source: source,
+                sourceIdentifier: "excluded",
+                sourceType: .calendar,
+                title: "Too far out",
+                startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 19, hour: 8, minute: 0))!,
+                endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 19, hour: 9, minute: 0))!
+            )
+        ]
+        let request = BriefingRequest(
+            audience: .john,
+            date: requestDate,
+            normalizedItems: items,
+            weather: nil,
+            headlines: [],
+            mediaItems: [],
+            dueSoon: [],
+            preferredMode: .templated
+        )
+        let opening = GeneratedNarrative(text: "Today looks busy.", preferredMode: .templated, actualMode: .templated)
+        let news = GeneratedNarrative(text: "", preferredMode: .templated, actualMode: .templated)
+
+        let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
+
+        #expect(artifact.sections.map(\.title) == ["Today", "Tomorrow", "Upcoming"])
+        #expect(artifact.sections.contains(where: { $0.title == "This Morning" }) == false)
+        #expect(artifact.sections.contains(where: { $0.title == "Tonight" }) == false)
+        #expect(artifact.sections.contains(where: { $0.title == "Coming Up" }) == false)
+        #expect(artifact.sections.first(where: { $0.title == "Today" })?.items.map(\.id) == ["calendar:today"])
+        #expect(artifact.sections.first(where: { $0.title == "Tomorrow" })?.items.map(\.id) == ["calendar:tomorrow"])
+        #expect(artifact.sections.first(where: { $0.title == "Upcoming" })?.items.map(\.id) == ["calendar:upcoming-1", "calendar:upcoming-2"])
+        #expect(artifact.bodyHTML.contains("Too far out") == false)
+    }
+
+    @Test
     func scheduledSendCoordinatorPreventsDuplicateSends() {
         let coordinator = ScheduledSendCoordinator()
         let calendar = Calendar.readyRoomGregorian
@@ -567,6 +644,148 @@ struct ReadyRoomFoundationTests {
         )
 
         #expect(DashboardTimelinePolicy.shouldDisplay(item))
+    }
+
+    @Test
+    func dashboardTimelinePolicyCapsVisibleWindowAtFiveDaysAfterThreeAM() {
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 10, minute: 0))!
+        let item = NormalizedItem(
+            id: "calendar:week-long",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "week-long",
+            sourceType: .calendar,
+            title: "Spring break",
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 21))!,
+            isAllDay: true
+        )
+
+        let buckets = DashboardTimelinePolicy.dayBuckets(for: now, calendar: calendar)
+        let days = DashboardTimelinePolicy.displayDays(item, now: now, calendar: calendar)
+
+        #expect(buckets.visibleDays == [
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 14))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 15))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 16))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 17))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 18))!
+        ])
+        #expect(buckets.upcoming == [
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 16))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 17))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 18))!
+        ])
+        #expect(days == buckets.visibleDays)
+    }
+
+    @Test
+    func dashboardTimelinePolicyKeepsYesterdayButStillCapsTotalDaysBeforeThreeAM() {
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 1, minute: 30))!
+        let item = NormalizedItem(
+            id: "calendar:week-long-carry",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "week-long-carry",
+            sourceType: .calendar,
+            title: "Spring break",
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 13))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 21))!,
+            isAllDay: true
+        )
+
+        let buckets = DashboardTimelinePolicy.dayBuckets(for: now, calendar: calendar)
+        let days = DashboardTimelinePolicy.displayDays(item, now: now, calendar: calendar)
+
+        #expect(buckets.visibleDays == [
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 13))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 14))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 15))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 16))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 17))!
+        ])
+        #expect(buckets.carryoverDays == [
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 13))!
+        ])
+        #expect(buckets.upcoming == [
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 16))!,
+            calendar.date(from: DateComponents(year: 2026, month: 3, day: 17))!
+        ])
+        #expect(days == buckets.visibleDays)
+    }
+
+    @Test
+    func dashboardTimelinePolicyGroupsPostTomorrowDaysIntoUpcomingSection() {
+        let calendar = Calendar.readyRoomGregorian
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 10, minute: 0))!
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let sections = DashboardTimelinePolicy.groupedSections(
+            for: [
+                NormalizedItem(
+                    id: "calendar:today",
+                    source: source,
+                    sourceIdentifier: "today",
+                    sourceType: .calendar,
+                    title: "School dropoff",
+                    startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 8, minute: 0))!,
+                    endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 8, minute: 30))!
+                ),
+                NormalizedItem(
+                    id: "calendar:tomorrow",
+                    source: source,
+                    sourceIdentifier: "tomorrow",
+                    sourceType: .calendar,
+                    title: "Piano lesson",
+                    startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 15, hour: 16, minute: 0))!,
+                    endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 15, hour: 17, minute: 0))!
+                ),
+                NormalizedItem(
+                    id: "calendar:upcoming-1",
+                    source: source,
+                    sourceIdentifier: "upcoming-1",
+                    sourceType: .calendar,
+                    title: "Team sync",
+                    startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 16, hour: 10, minute: 0))!,
+                    endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 16, hour: 10, minute: 30))!
+                ),
+                NormalizedItem(
+                    id: "calendar:upcoming-2",
+                    source: source,
+                    sourceIdentifier: "upcoming-2",
+                    sourceType: .calendar,
+                    title: "Band concert",
+                    startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 18, hour: 19, minute: 0))!,
+                    endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 18, hour: 20, minute: 0))!
+                ),
+                NormalizedItem(
+                    id: "calendar:excluded",
+                    source: source,
+                    sourceIdentifier: "excluded",
+                    sourceType: .calendar,
+                    title: "Outside window",
+                    startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 19, hour: 9, minute: 0))!,
+                    endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 19, hour: 10, minute: 0))!
+                )
+            ],
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(sections.map(\.title) == [
+            "Today — Saturday, Mar 14",
+            "Tomorrow — Sunday, Mar 15",
+            "Upcoming"
+        ])
+        #expect(sections[0].dayGroups[0].scheduledItems.map(\.id) == ["calendar:today"])
+        #expect(sections[1].dayGroups[0].scheduledItems.map(\.id) == ["calendar:tomorrow"])
+        #expect(sections[2].dayGroups.map(\.title) == [
+            "Monday, Mar 16",
+            "Wednesday, Mar 18"
+        ])
+        #expect(sections[2].dayGroups.flatMap { $0.scheduledItems.map(\.id) } == [
+            "calendar:upcoming-1",
+            "calendar:upcoming-2"
+        ])
     }
 
     @Test

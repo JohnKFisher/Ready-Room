@@ -36,6 +36,7 @@ Implemented in this foundation pass:
 - obligations now appear on the dashboard timeline as all-day items, due-soon cards show remaining days, and Storage/Sync preferences expose the actual shared-vs-local file locations and sync mode
 - open apps now reload shared obligations on refresh and watch the shared obligations file timestamp during the existing minute loop so cross-Mac updates can appear without relaunch
 - calendar items are only marked cancelled when the source explicitly reports cancellation, and the dashboard now keeps yesterday visible until 3:00 AM while dimming finished items as complete
+- dashboard and briefing day breaks now use a fixed five-day window: `Today`, `Tomorrow`, and a combined `Upcoming` bucket for the next visible future days, while the dashboard still preserves the overnight `Yesterday` carry window
 - the timeline remains permissive for calendar items even when their dashboard include-flag is false, preventing a regression where the main timeline appeared nearly empty
 - the Settings sidebar now uses explicit tagged sidebar rows so subsection selection works reliably on macOS
 - the Storage/Sync screen now distinguishes between iCloud not being active for the current build/Mac and files simply not having been created yet

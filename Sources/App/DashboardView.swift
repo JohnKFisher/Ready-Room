@@ -16,38 +16,9 @@ struct DashboardView: View {
         }
     }
 
-    private var groupedTimeline: [TimelineDayGroup] {
+    private var timelineSections: [DashboardTimelineSection] {
         let calendar = Calendar.readyRoomGregorian
-        let placements = timelineItems.flatMap { item in
-            DashboardTimelinePolicy.displayDays(item, now: model.now, calendar: calendar).map { day in
-                TimelinePlacement(date: day, item: item)
-            }
-        }
-        let grouped = Dictionary(grouping: placements) { placement in
-            placement.date
-        }
-        return grouped.keys.sorted().map { date in
-            let dayPlacements: [TimelinePlacement] = grouped[date] ?? []
-            let items = dayPlacements.map(\.item)
-            let sortedItems = items.sorted { lhs, rhs in
-                switch (lhs.startDate, rhs.startDate) {
-                case let (lhsDate?, rhsDate?):
-                    return lhsDate < rhsDate
-                case (_?, nil):
-                    return true
-                case (nil, _?):
-                    return false
-                case (nil, nil):
-                    return lhs.title < rhs.title
-                }
-            }
-            return TimelineDayGroup(
-                date: date,
-                title: dayTitle(for: date, calendar: calendar),
-                allDayItems: sortedItems.filter(\.isAllDay),
-                scheduledItems: sortedItems.filter { !$0.isAllDay }
-            )
-        }
+        return DashboardTimelinePolicy.groupedSections(for: timelineItems, now: model.now, calendar: calendar)
     }
 
     var body: some View {
@@ -176,24 +147,20 @@ struct DashboardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(groupedTimeline) { group in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(group.title)
-                            .font(.title3.weight(group.isToday ? .bold : .semibold))
+                ForEach(timelineSections) { section in
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(section.title)
+                            .font(.title3.weight(section.highlightsCurrentDay ? .bold : .semibold))
 
-                        if !group.allDayItems.isEmpty {
+                        ForEach(section.dayGroups) { dayGroup in
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("All Day")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                ForEach(group.allDayItems) { item in
-                                    TimelineItemView(item: item, now: model.now)
+                                if section.showsDaySubheaders {
+                                    Text(dayGroup.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
                                 }
+                                timelineDayGroupContent(dayGroup)
                             }
-                        }
-
-                        ForEach(group.scheduledItems) { item in
-                            TimelineItemView(item: item, now: model.now)
                         }
                     }
                     .padding()
@@ -320,20 +287,22 @@ struct DashboardView: View {
         }
     }
 
-    private func dayTitle(for date: Date, calendar: Calendar) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMM d"
+    @ViewBuilder
+    private func timelineDayGroupContent(_ dayGroup: DashboardTimelineDayGroup) -> some View {
+        if !dayGroup.allDayItems.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("All Day")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(dayGroup.allDayItems) { item in
+                    TimelineItemView(item: item, now: model.now)
+                }
+            }
+        }
 
-        if calendar.isDateInToday(date) {
-            return "Today — \(formatter.string(from: date))"
+        ForEach(dayGroup.scheduledItems) { item in
+            TimelineItemView(item: item, now: model.now)
         }
-        if calendar.isDateInTomorrow(date) {
-            return "Tomorrow — \(formatter.string(from: date))"
-        }
-        if calendar.isDateInYesterday(date) {
-            return "Yesterday — \(formatter.string(from: date))"
-        }
-        return formatter.string(from: date)
     }
 
     private func dueSoonDetail(for item: NormalizedItem) -> String {
@@ -359,17 +328,24 @@ struct DashboardView: View {
     }
 }
 
-private struct TimelineDayGroup: Identifiable {
+struct DashboardTimelineSection: Identifiable {
+    let id: String
+    let title: String
+    let highlightsCurrentDay: Bool
+    let showsDaySubheaders: Bool
+    let dayGroups: [DashboardTimelineDayGroup]
+}
+
+struct DashboardTimelineDayGroup: Identifiable {
     let date: Date
     let title: String
     let allDayItems: [NormalizedItem]
     let scheduledItems: [NormalizedItem]
 
     var id: Date { date }
-    var isToday: Bool { Calendar.readyRoomGregorian.isDateInToday(date) }
 }
 
-private struct TimelinePlacement {
+struct DashboardTimelinePlacement {
     let date: Date
     let item: NormalizedItem
 }
@@ -546,6 +522,14 @@ private struct TimelineStatusBadge: View {
 }
 
 enum DashboardTimelinePolicy {
+    static func dayBuckets(for now: Date, calendar: Calendar = .readyRoomGregorian) -> ReadyRoomDayBuckets {
+        ReadyRoomDayBuckets(
+            anchorDay: now.startOfDay(in: calendar),
+            effectiveStartDay: earliestVisibleDay(for: now, calendar: calendar),
+            calendar: calendar
+        )
+    }
+
     static func shouldDisplay(_ item: NormalizedItem) -> Bool {
         switch item.sourceType {
         case .calendar:
@@ -563,15 +547,107 @@ enum DashboardTimelinePolicy {
         !displayDays(item, now: now, calendar: calendar).isEmpty
     }
 
+    static func groupedSections(
+        for items: [NormalizedItem],
+        now: Date,
+        calendar: Calendar = .readyRoomGregorian
+    ) -> [DashboardTimelineSection] {
+        let dayBuckets = dayBuckets(for: now, calendar: calendar)
+        let placements = items.flatMap { item in
+            displayDays(item, now: now, calendar: calendar).map { day in
+                DashboardTimelinePlacement(date: day, item: item)
+            }
+        }
+        let groupedPlacements = Dictionary(grouping: placements) { placement in
+            placement.date
+        }
+
+        func makeDayGroup(for date: Date) -> DashboardTimelineDayGroup? {
+            let dayPlacements = groupedPlacements[date] ?? []
+            guard !dayPlacements.isEmpty else {
+                return nil
+            }
+
+            let sortedItems = sortItems(dayPlacements.map(\.item))
+            return DashboardTimelineDayGroup(
+                date: date,
+                title: formattedDateTitle(for: date),
+                allDayItems: sortedItems.filter(\.isAllDay),
+                scheduledItems: sortedItems.filter { !$0.isAllDay }
+            )
+        }
+
+        var sections: [DashboardTimelineSection] = []
+
+        for carryoverDay in dayBuckets.carryoverDays {
+            guard let dayGroup = makeDayGroup(for: carryoverDay) else {
+                continue
+            }
+            sections.append(
+                DashboardTimelineSection(
+                    id: "carryover-\(carryoverDay.timeIntervalSinceReferenceDate)",
+                    title: labeledTitle(label: "Yesterday", date: carryoverDay),
+                    highlightsCurrentDay: false,
+                    showsDaySubheaders: false,
+                    dayGroups: [dayGroup]
+                )
+            )
+        }
+
+        if let todayGroup = makeDayGroup(for: dayBuckets.today) {
+            sections.append(
+                DashboardTimelineSection(
+                    id: "today",
+                    title: labeledTitle(label: "Today", date: dayBuckets.today),
+                    highlightsCurrentDay: true,
+                    showsDaySubheaders: false,
+                    dayGroups: [todayGroup]
+                )
+            )
+        }
+
+        if let tomorrowGroup = makeDayGroup(for: dayBuckets.tomorrow) {
+            sections.append(
+                DashboardTimelineSection(
+                    id: "tomorrow",
+                    title: labeledTitle(label: "Tomorrow", date: dayBuckets.tomorrow),
+                    highlightsCurrentDay: false,
+                    showsDaySubheaders: false,
+                    dayGroups: [tomorrowGroup]
+                )
+            )
+        }
+
+        let upcomingGroups = dayBuckets.upcoming.compactMap(makeDayGroup)
+        if !upcomingGroups.isEmpty {
+            sections.append(
+                DashboardTimelineSection(
+                    id: "upcoming",
+                    title: "Upcoming",
+                    highlightsCurrentDay: false,
+                    showsDaySubheaders: true,
+                    dayGroups: upcomingGroups
+                )
+            )
+        }
+
+        return sections
+    }
+
     static func displayDays(_ item: NormalizedItem, now: Date, calendar: Calendar = .readyRoomGregorian) -> [Date] {
-        let visibleStart = earliestVisibleDay(for: now, calendar: calendar)
+        let dayBuckets = dayBuckets(for: now, calendar: calendar)
+        let visibleStart = dayBuckets.effectiveStartDay
+        let visibleEnd = dayBuckets.visibleEndDay
         guard let startDate = item.startDate else {
             return [visibleStart]
         }
 
         let startDay = startDate.startOfDay(in: calendar)
         guard item.isAllDay else {
-            return startDay >= visibleStart ? [startDay] : []
+            guard startDay >= visibleStart && startDay <= visibleEnd else {
+                return []
+            }
+            return [startDay]
         }
 
         let lastDay = lastCoveredDay(for: item, calendar: calendar) ?? startDay
@@ -581,7 +657,8 @@ enum DashboardTimelinePolicy {
 
         var days: [Date] = []
         var cursor = max(startDay, visibleStart)
-        while cursor <= lastDay {
+        let finalVisibleDay = min(lastDay, visibleEnd)
+        while cursor <= finalVisibleDay {
             days.append(cursor)
             cursor = cursor.adding(days: 1, calendar: calendar)
         }
@@ -619,6 +696,31 @@ enum DashboardTimelinePolicy {
             return endDay.adding(days: -1, calendar: calendar)
         }
         return startDay
+    }
+
+    private static func sortItems(_ items: [NormalizedItem]) -> [NormalizedItem] {
+        items.sorted { lhs, rhs in
+            switch (lhs.startDate, rhs.startDate) {
+            case let (lhsDate?, rhsDate?):
+                return lhsDate < rhsDate
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return lhs.title < rhs.title
+            }
+        }
+    }
+
+    private static func labeledTitle(label: String, date: Date) -> String {
+        "\(label) — \(formattedDateTitle(for: date))"
+    }
+
+    private static func formattedDateTitle(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMM d"
+        return formatter.string(from: date)
     }
 }
 

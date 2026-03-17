@@ -44,10 +44,11 @@ public struct BriefingComposer: Sendable {
     public func buildSections(request: BriefingRequest, newsSummary: GeneratedNarrative) -> [BriefingSection] {
         let calendar = Calendar.readyRoomGregorian
         let startOfToday = request.date.startOfDay(in: calendar)
-        let noon = calendar.date(byAdding: .hour, value: 12, to: startOfToday) ?? request.date
-        let evening = calendar.date(byAdding: .hour, value: 17, to: startOfToday) ?? request.date
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? request.date
-        let weekOut = calendar.date(byAdding: .day, value: 7, to: startOfToday) ?? request.date
+        let dayBuckets = ReadyRoomDayBuckets(
+            anchorDay: startOfToday,
+            effectiveStartDay: startOfToday,
+            calendar: calendar
+        )
 
         let relevant = request.normalizedItems
             .filter { item in
@@ -62,36 +63,19 @@ public struct BriefingComposer: Sendable {
 
         var sections: [BriefingSection] = []
 
-        let thisMorning = relevant.filter {
-            guard let start = $0.startDate else { return false }
-            return start >= request.date && start < noon
-        }
-        if !thisMorning.isEmpty {
-            sections.append(makeSection(title: "This Morning", items: thisMorning, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
-        }
-
-        let today = relevant.filter {
-            guard let start = $0.startDate else { return false }
-            return start >= startOfToday && start < evening
-        }
+        let today = items(on: dayBuckets.today, from: relevant, calendar: calendar)
         if !today.isEmpty {
             sections.append(makeSection(title: "Today", items: today, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
-        let tonight = relevant.filter {
-            guard let start = $0.startDate else { return false }
-            return start >= evening && start < tomorrow
-        }
-        if !tonight.isEmpty {
-            sections.append(makeSection(title: "Tonight", items: tonight, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+        let tomorrow = items(on: dayBuckets.tomorrow, from: relevant, calendar: calendar)
+        if !tomorrow.isEmpty {
+            sections.append(makeSection(title: "Tomorrow", items: tomorrow, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
-        let comingUp = relevant.filter {
-            guard let start = $0.startDate else { return false }
-            return start >= tomorrow && start < weekOut
-        }
-        if !comingUp.isEmpty {
-            sections.append(makeSection(title: "Coming Up", items: comingUp, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+        let upcoming = items(onAnyOf: dayBuckets.upcoming, from: relevant, calendar: calendar)
+        if !upcoming.isEmpty {
+            sections.append(makeSection(title: "Upcoming", items: upcoming, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
         }
 
         if !request.dueSoon.isEmpty {
@@ -136,6 +120,25 @@ public struct BriefingComposer: Sendable {
         }
 
         return sections
+    }
+
+    private func items(on day: Date, from items: [NormalizedItem], calendar: Calendar) -> [NormalizedItem] {
+        items.filter { item in
+            guard let startDate = item.startDate else {
+                return false
+            }
+            return startDate.startOfDay(in: calendar) == day
+        }
+    }
+
+    private func items(onAnyOf days: [Date], from items: [NormalizedItem], calendar: Calendar) -> [NormalizedItem] {
+        let includedDays = Set(days)
+        return items.filter { item in
+            guard let startDate = item.startDate else {
+                return false
+            }
+            return includedDays.contains(startDate.startOfDay(in: calendar))
+        }
     }
 
     private func makeSection(title: String, items: [NormalizedItem], calendarPlaceholderLabel: String? = nil) -> BriefingSection {
