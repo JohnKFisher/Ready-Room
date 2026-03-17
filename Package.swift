@@ -55,7 +55,8 @@ let package = Package(
             ],
             path: "Sources/App",
             exclude: [
-                "Info.plist"
+                "Info.plist",
+                "Resources"
             ],
             linkerSettings: [
                 .unsafeFlags([

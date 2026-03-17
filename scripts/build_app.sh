@@ -7,6 +7,8 @@ APP_DIR="$ROOT_DIR/dist/Ready Room.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
+ICONSET_DIR="$ROOT_DIR/Sources/App/Resources/AppIcon.iconset"
+GENERATED_ICNS="$ROOT_DIR/.build/AppIcon.icns"
 VERSION_FILE="$ROOT_DIR/VERSION"
 LAST_VERSION_FILE="$ROOT_DIR/LAST_BUILT_VERSION"
 BUILD_NUMBER_FILE="$ROOT_DIR/BUILD_NUMBER"
@@ -58,7 +60,15 @@ pushd "$ROOT_DIR" >/dev/null
 swift build -c release --product ReadyRoomApp
 popd >/dev/null
 
+if [[ ! -d "$ICONSET_DIR" ]]; then
+  echo "Missing app icon source set at $ICONSET_DIR" >&2
+  exit 1
+fi
+
+iconutil --convert icns "$ICONSET_DIR" --output "$GENERATED_ICNS"
+
 cp "$BUILD_DIR/ReadyRoomApp" "$MACOS_DIR/Ready Room"
 cp "$PLIST_PATH" "$CONTENTS_DIR/Info.plist"
+cp "$GENERATED_ICNS" "$RESOURCES_DIR/AppIcon.icns"
 
 echo "Built $APP_DIR"
