@@ -106,6 +106,11 @@ final class ReadyRoomAppModel: ObservableObject {
     private let weatherLocationResolver = AppleLocationSearchResolver()
     private var lastKnownObligationsModifiedAt: Date?
     private var attemptedScheduledSendKeys: Set<String> = []
+    private let narrativePipelines: [NarrativeGenerationMode: NarrativeGenerationPipeline] = [
+        .foundationModels: NarrativeGenerationPipeline(preferred: FoundationModelsNarrativeGenerator()),
+        .ollama: NarrativeGenerationPipeline(preferred: OllamaNarrativeGenerator()),
+        .templated: NarrativeGenerationPipeline(preferred: TemplatedNarrativeGenerator())
+    ]
 
     init() {
         Task {
@@ -611,20 +616,35 @@ final class ReadyRoomAppModel: ObservableObject {
         dashboardSummaryByMode = [:]
         previewArtifacts = [:]
 
-        let pipelines: [NarrativeGenerationMode: NarrativeGenerationPipeline] = [
-            .foundationModels: NarrativeGenerationPipeline(preferred: FoundationModelsNarrativeGenerator()),
-            .ollama: NarrativeGenerationPipeline(preferred: OllamaNarrativeGenerator()),
-            .templated: NarrativeGenerationPipeline(preferred: TemplatedNarrativeGenerator())
+        let sourceStatuses = sourceSnapshots.map { $0.health.resolvedStatus(at: now) }
+        let weightedHeadlinesByAudience: [BriefingAudience: [NewsHeadline]] = [
+            .john: weightedHeadlines(for: .john),
+            .amy: weightedHeadlines(for: .amy)
         ]
+        let dueSoonByAudience: [BriefingAudience: [NormalizedItem]] = [
+            .john: dueSoon.filter(\.inclusion.johnBriefing),
+            .amy: dueSoon.filter(\.inclusion.amyBriefing)
+        ]
+        let recipientsByAudience: [BriefingAudience: [String]] = [
+            .john: defaultRecipients(for: .john),
+            .amy: defaultRecipients(for: .amy)
+        ]
+        let calendarPlaceholderLabel = placeholderLabel(for: .calendar)
+        let weatherPlaceholderLabel = placeholderLabel(for: .weather)
+        let newsPlaceholderLabel = placeholderLabel(for: .news)
+        let mediaPlaceholderLabel = placeholderLabel(for: .media)
 
         for mode in NarrativeGenerationMode.allCases {
+            guard let pipeline = narrativePipelines[mode] else {
+                continue
+            }
             let context = DashboardSummaryContext(
                 normalizedItems: normalizedItems,
                 weather: weather,
                 dueSoon: dueSoon,
-                sourceStatuses: sourceSnapshots.map { $0.health.resolvedStatus(at: now) }
+                sourceStatuses: sourceStatuses
             )
-            let summary = await pipelines[mode]!.dashboardSummary(for: context, preferredMode: mode)
+            let summary = await pipeline.dashboardSummary(for: context, preferredMode: mode)
             dashboardSummaryByMode[mode] = summary
 
             for audience in BriefingAudience.allCases {
@@ -633,21 +653,21 @@ final class ReadyRoomAppModel: ObservableObject {
                     date: now,
                     normalizedItems: normalizedItems,
                     weather: weather,
-                    headlines: weightedHeadlines(for: audience),
+                    headlines: weightedHeadlinesByAudience[audience] ?? [],
                     mediaItems: mediaItems,
-                    dueSoon: dueSoon.filter { audience == .john ? $0.inclusion.johnBriefing : $0.inclusion.amyBriefing },
+                    dueSoon: dueSoonByAudience[audience] ?? [],
                     preferredMode: mode,
                     personColorPalette: personColorPaletteSettings,
-                    calendarPlaceholderLabel: placeholderLabel(for: .calendar),
-                    weatherPlaceholderLabel: placeholderLabel(for: .weather),
-                    newsPlaceholderLabel: placeholderLabel(for: .news),
-                    mediaPlaceholderLabel: placeholderLabel(for: .media)
+                    calendarPlaceholderLabel: calendarPlaceholderLabel,
+                    weatherPlaceholderLabel: weatherPlaceholderLabel,
+                    newsPlaceholderLabel: newsPlaceholderLabel,
+                    mediaPlaceholderLabel: mediaPlaceholderLabel
                 )
                 let artifact = BriefingComposer().compose(
                     request: request,
-                    recipients: defaultRecipients(for: audience),
-                    openingLine: await pipelines[mode]!.openingLine(for: request),
-                    newsSummary: await pipelines[mode]!.newsSummary(for: request)
+                    recipients: recipientsByAudience[audience] ?? [],
+                    openingLine: await pipeline.openingLine(for: request),
+                    newsSummary: await pipeline.newsSummary(for: request)
                 )
                 var byMode = previewArtifacts[audience] ?? [:]
                 byMode[mode] = artifact

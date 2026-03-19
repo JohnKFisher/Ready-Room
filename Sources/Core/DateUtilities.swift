@@ -1,5 +1,32 @@
 import Foundation
 
+public enum ReadyRoomFormatters {
+    public static let monthDayWeekday: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d"
+        return formatter
+    }()
+
+    public static let shortClock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
+    public static let abbreviatedWeekdayMonthDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d"
+        return formatter
+    }()
+
+    public static let dashboardSectionTitle: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMM d"
+        return formatter
+    }()
+}
+
 public extension Calendar {
     static var readyRoomGregorian: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -18,16 +45,11 @@ public extension Date {
     }
 
     func formattedMonthDayWeekday() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMMM d"
-        return formatter.string(from: self)
+        ReadyRoomFormatters.monthDayWeekday.string(from: self)
     }
 
     func formattedClock() -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-        return formatter.string(from: self)
+        ReadyRoomFormatters.shortClock.string(from: self)
     }
 }
 

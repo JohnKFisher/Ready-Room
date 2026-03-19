@@ -7,8 +7,9 @@ struct DashboardView: View {
     @ObservedObject var model: ReadyRoomAppModel
 
     private var timelineItems: [NormalizedItem] {
+        let existingIDs = Set(model.normalizedItems.map(\.id))
         let merged = model.normalizedItems + model.dueSoon.filter { obligation in
-            model.normalizedItems.contains(where: { $0.id == obligation.id }) == false
+            existingIDs.contains(obligation.id) == false
         }
         return merged.filter { item in
             DashboardTimelinePolicy.shouldDisplay(item) &&
@@ -356,43 +357,12 @@ private struct TimelineItemView: View {
     let palette: PersonColorPaletteSettings
     @State private var showingDetails = false
 
-    private var isCompleted: Bool {
-        DashboardTimelinePolicy.isCompleted(item, now: now)
-    }
-
-    private var accent: ItemAudienceAccent {
-        ItemAudienceAccentResolver.resolve(for: item, palette: palette)
-    }
-
-    private var detailText: String? {
-        guard let notes = item.notes?.trimmingCharacters(in: .whitespacesAndNewlines), notes.isEmpty == false else {
-            return nil
-        }
-        return notes
-    }
-
-    private var statusText: String? {
-        if item.changeState == .cancelled {
-            return "Cancelled"
-        }
-        if isCompleted {
-            return "Complete"
-        }
-        switch item.changeState {
-        case .unchanged:
-            return nil
-        case .new:
-            return "New"
-        case .changed:
-            return "Changed"
-        case .cancelled:
-            return "Cancelled"
-        case .enteredReminderWindow:
-            return "Due Soon"
-        }
-    }
-
     var body: some View {
+        let accent = ItemAudienceAccentResolver.resolve(for: item, palette: palette)
+        let isCompleted = DashboardTimelinePolicy.isCompleted(item, now: now)
+        let statusText = timelineStatusText(isCompleted: isCompleted)
+        let detailText = item.notes?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyValue
+
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(item.isAllDay ? "All Day" : item.startDate?.formattedClock() ?? "TBD")
@@ -403,7 +373,7 @@ private struct TimelineItemView: View {
                     .foregroundStyle(isCompleted ? .secondary : .primary)
                 Spacer()
                 if let statusText {
-                    TimelineStatusBadge(text: statusText, appearance: badgeAppearance)
+                    TimelineStatusBadge(text: statusText, appearance: badgeAppearance(isCompleted: isCompleted))
                 }
             }
             Text(item.metadata["calendarTitle"] ?? item.source.displayName)
@@ -466,7 +436,28 @@ private struct TimelineItemView: View {
         .opacity(isCompleted ? 0.82 : 1)
     }
 
-    private var badgeAppearance: TimelineStatusBadge.Appearance {
+    private func timelineStatusText(isCompleted: Bool) -> String? {
+        if item.changeState == .cancelled {
+            return "Cancelled"
+        }
+        if isCompleted {
+            return "Complete"
+        }
+        switch item.changeState {
+        case .unchanged:
+            return nil
+        case .new:
+            return "New"
+        case .changed:
+            return "Changed"
+        case .cancelled:
+            return "Cancelled"
+        case .enteredReminderWindow:
+            return "Due Soon"
+        }
+    }
+
+    private func badgeAppearance(isCompleted: Bool) -> TimelineStatusBadge.Appearance {
         if item.changeState == .cancelled {
             return .cancelled
         }
@@ -635,9 +626,11 @@ enum DashboardTimelinePolicy {
         calendar: Calendar = .readyRoomGregorian
     ) -> [DashboardTimelineSection] {
         let dayBuckets = dayBuckets(for: now, calendar: calendar)
-        let placements = items.flatMap { item in
-            displayDays(item, now: now, calendar: calendar).map { day in
-                DashboardTimelinePlacement(date: day, item: item)
+        var placements: [DashboardTimelinePlacement] = []
+        placements.reserveCapacity(items.count * 2)
+        for item in items {
+            for day in displayDays(item, now: now, calendar: calendar) {
+                placements.append(DashboardTimelinePlacement(date: day, item: item))
             }
         }
         let groupedPlacements = Dictionary(grouping: placements) { placement in
@@ -651,11 +644,22 @@ enum DashboardTimelinePolicy {
             }
 
             let sortedItems = sortItems(dayPlacements.map(\.item))
+            var allDayItems: [NormalizedItem] = []
+            var scheduledItems: [NormalizedItem] = []
+            allDayItems.reserveCapacity(sortedItems.count)
+            scheduledItems.reserveCapacity(sortedItems.count)
+            for item in sortedItems {
+                if item.isAllDay {
+                    allDayItems.append(item)
+                } else {
+                    scheduledItems.append(item)
+                }
+            }
             return DashboardTimelineDayGroup(
                 date: date,
                 title: formattedDateTitle(for: date),
-                allDayItems: sortedItems.filter(\.isAllDay),
-                scheduledItems: sortedItems.filter { !$0.isAllDay }
+                allDayItems: allDayItems,
+                scheduledItems: scheduledItems
             )
         }
 
@@ -800,9 +804,13 @@ enum DashboardTimelinePolicy {
     }
 
     private static func formattedDateTitle(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMM d"
-        return formatter.string(from: date)
+        ReadyRoomFormatters.dashboardSectionTitle.string(from: date)
+    }
+}
+
+private extension String {
+    var nonEmptyValue: String? {
+        isEmpty ? nil : self
     }
 }
 

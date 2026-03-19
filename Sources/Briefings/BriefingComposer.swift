@@ -11,9 +11,7 @@ public struct BriefingComposer: Sendable {
         newsSummary: GeneratedNarrative
     ) -> BriefingArtifact {
         let sections = buildSections(request: request, newsSummary: newsSummary)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMMM d"
-        let subject = "Daily Briefing for \(request.audience.displayName) — \(formatter.string(from: request.date))"
+        let subject = "Daily Briefing for \(request.audience.displayName) — \(ReadyRoomFormatters.monthDayWeekday.string(from: request.date))"
 
         let preferredMode = request.preferredMode
         let actualMode = [openingLine.actualMode, newsSummary.actualMode].contains { $0 != preferredMode } ? openingLine.actualMode : preferredMode
@@ -170,17 +168,11 @@ public struct BriefingComposer: Sendable {
             return item.isAllDay ? "All day" : ""
         }
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "EEE, MMM d"
-
         if item.isAllDay {
-            return "\(dateFormatter.string(from: start)) — All day"
+            return "\(ReadyRoomFormatters.abbreviatedWeekdayMonthDay.string(from: start)) — All day"
         }
 
-        let timeFormatter = DateFormatter()
-        timeFormatter.timeStyle = .short
-        timeFormatter.dateStyle = .none
-        return "\(dateFormatter.string(from: start)) at \(timeFormatter.string(from: start))"
+        return "\(ReadyRoomFormatters.abbreviatedWeekdayMonthDay.string(from: start)) at \(ReadyRoomFormatters.shortClock.string(from: start))"
     }
 
     private func renderHTML(request: BriefingRequest, openingLine: String, newsSummary: String, sections: [BriefingSection]) -> String {
