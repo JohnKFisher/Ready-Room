@@ -431,6 +431,225 @@ public struct WeatherSettings: Codable, Sendable, Hashable {
     }
 }
 
+public enum NewsSurface: String, Codable, CaseIterable, Sendable, Hashable {
+    case dashboard
+    case john
+    case amy
+
+    public var displayName: String {
+        switch self {
+        case .dashboard:
+            "Dashboard"
+        case .john:
+            "John"
+        case .amy:
+            "Amy"
+        }
+    }
+}
+
+public enum NewsCategory: String, Codable, CaseIterable, Sendable, Hashable {
+    case general
+    case world
+    case local
+    case business
+    case technology
+    case family
+    case entertainment
+    case sports
+
+    public var displayName: String {
+        rawValue.capitalized
+    }
+}
+
+public struct ConfiguredNewsFeed: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var label: String
+    public var feedURLString: String
+    public var category: NewsCategory
+    public var sourcePriority: Double
+    public var isEnabled: Bool
+    public var isUserAdded: Bool
+
+    public init(
+        id: String = UUID().uuidString,
+        label: String,
+        feedURLString: String,
+        category: NewsCategory,
+        sourcePriority: Double = 1.0,
+        isEnabled: Bool = true,
+        isUserAdded: Bool = false
+    ) {
+        self.id = id
+        self.label = label
+        self.feedURLString = feedURLString
+        self.category = category
+        self.sourcePriority = sourcePriority
+        self.isEnabled = isEnabled
+        self.isUserAdded = isUserAdded
+    }
+
+    public var trimmedLabel: String {
+        label.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var trimmedFeedURLString: String {
+        feedURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var resolvedURL: URL? {
+        guard let url = URL(string: trimmedFeedURLString),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme) else {
+            return nil
+        }
+        return url
+    }
+}
+
+public struct NewsProfile: Codable, Sendable, Hashable {
+    public var includedFeedIDs: [String]
+    public var feedBoosts: [String: Double]
+
+    public init(includedFeedIDs: [String] = [], feedBoosts: [String: Double] = [:]) {
+        self.includedFeedIDs = includedFeedIDs
+        self.feedBoosts = feedBoosts
+    }
+
+    public static func `default`(for feeds: [ConfiguredNewsFeed]) -> NewsProfile {
+        NewsProfile(includedFeedIDs: feeds.filter(\.isEnabled).map(\.id).sorted())
+    }
+
+    public func normalized(
+        availableFeeds: [ConfiguredNewsFeed],
+        includeNewFeedsByDefault: Bool
+    ) -> NewsProfile {
+        let availableIDs = Set(availableFeeds.map(\.id))
+        var normalizedIDs = includedFeedIDs.filter { availableIDs.contains($0) }
+        if includeNewFeedsByDefault {
+            let enabledIDs = availableFeeds.filter(\.isEnabled).map(\.id)
+            for id in enabledIDs where normalizedIDs.contains(id) == false {
+                normalizedIDs.append(id)
+            }
+        }
+
+        let normalizedBoosts = feedBoosts
+            .filter { availableIDs.contains($0.key) && $0.value.isFinite && $0.value != 0 }
+
+        return NewsProfile(
+            includedFeedIDs: normalizedIDs.sorted(),
+            feedBoosts: normalizedBoosts
+        )
+    }
+
+    public func includes(feedID: String) -> Bool {
+        includedFeedIDs.contains(feedID)
+    }
+
+    public func boost(for feedID: String) -> Double {
+        feedBoosts[feedID] ?? 0
+    }
+}
+
+public struct NewsSettings: Codable, Sendable, Hashable {
+    public var feeds: [ConfiguredNewsFeed]
+    public var baseProfile: NewsProfile
+    public var dashboardOverride: NewsProfile?
+    public var johnOverride: NewsProfile?
+    public var amyOverride: NewsProfile?
+
+    public init(
+        feeds: [ConfiguredNewsFeed] = NewsSettings.starterFeeds,
+        baseProfile: NewsProfile? = nil,
+        dashboardOverride: NewsProfile? = nil,
+        johnOverride: NewsProfile? = nil,
+        amyOverride: NewsProfile? = nil
+    ) {
+        let normalizedFeeds = feeds
+        self.feeds = normalizedFeeds
+        let shouldAutoIncludeNewFeeds = baseProfile == nil
+        self.baseProfile = (baseProfile ?? NewsProfile.default(for: normalizedFeeds))
+            .normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: shouldAutoIncludeNewFeeds)
+        self.dashboardOverride = dashboardOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
+        self.johnOverride = johnOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
+        self.amyOverride = amyOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
+    }
+
+    public static let starterFeeds: [ConfiguredNewsFeed] = [
+        ConfiguredNewsFeed(
+            id: "bbc-top-stories",
+            label: "BBC Top Stories",
+            feedURLString: "https://feeds.bbci.co.uk/news/rss.xml",
+            category: .general,
+            sourcePriority: 1.2
+        ),
+        ConfiguredNewsFeed(
+            id: "guardian-world",
+            label: "The Guardian World",
+            feedURLString: "https://www.theguardian.com/world/rss",
+            category: .world,
+            sourcePriority: 1.1
+        ),
+        ConfiguredNewsFeed(
+            id: "guardian-us",
+            label: "The Guardian US",
+            feedURLString: "https://www.theguardian.com/us-news/rss",
+            category: .general,
+            sourcePriority: 1.0
+        ),
+        ConfiguredNewsFeed(
+            id: "bbc-business",
+            label: "BBC Business",
+            feedURLString: "https://feeds.bbci.co.uk/news/business/rss.xml",
+            category: .business,
+            sourcePriority: 0.95
+        )
+    ]
+
+    public func normalized() -> NewsSettings {
+        NewsSettings(
+            feeds: feeds,
+            baseProfile: baseProfile,
+            dashboardOverride: dashboardOverride,
+            johnOverride: johnOverride,
+            amyOverride: amyOverride
+        )
+    }
+
+    public func effectiveProfile(for surface: NewsSurface) -> NewsProfile {
+        switch surface {
+        case .dashboard:
+            dashboardOverride?.normalized(availableFeeds: feeds, includeNewFeedsByDefault: false)
+            ?? baseProfile.normalized(availableFeeds: feeds, includeNewFeedsByDefault: false)
+        case .john:
+            johnOverride?.normalized(availableFeeds: feeds, includeNewFeedsByDefault: false)
+            ?? baseProfile.normalized(availableFeeds: feeds, includeNewFeedsByDefault: false)
+        case .amy:
+            amyOverride?.normalized(availableFeeds: feeds, includeNewFeedsByDefault: false)
+            ?? baseProfile.normalized(availableFeeds: feeds, includeNewFeedsByDefault: false)
+        }
+    }
+
+    public func applyingBaseToAllSurfaces() -> NewsSettings {
+        NewsSettings(feeds: feeds, baseProfile: baseProfile, dashboardOverride: nil, johnOverride: nil, amyOverride: nil)
+    }
+
+    public var hasAnyEnabledFeed: Bool {
+        feeds.contains(where: \.isEnabled)
+    }
+}
+
+public struct LastGoodNewsSnapshot: Codable, Sendable, Hashable {
+    public var headlines: [NewsHeadline]
+    public var fetchedAt: Date
+
+    public init(headlines: [NewsHeadline], fetchedAt: Date = .now) {
+        self.headlines = headlines
+        self.fetchedAt = fetchedAt
+    }
+}
+
 public struct NewsHeadline: Codable, Sendable, Hashable, Identifiable {
     public var id: String
     public var title: String
@@ -439,6 +658,10 @@ public struct NewsHeadline: Codable, Sendable, Hashable, Identifiable {
     public var sourceName: String
     public var publishedAt: Date?
     public var weight: Double
+    public var feedIdentifier: String?
+    public var category: NewsCategory?
+    public var sourcePriority: Double
+    public var rankingExplanation: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -447,7 +670,11 @@ public struct NewsHeadline: Codable, Sendable, Hashable, Identifiable {
         url: URL? = nil,
         sourceName: String,
         publishedAt: Date? = nil,
-        weight: Double = 1.0
+        weight: Double = 1.0,
+        feedIdentifier: String? = nil,
+        category: NewsCategory? = nil,
+        sourcePriority: Double = 1.0,
+        rankingExplanation: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -456,6 +683,10 @@ public struct NewsHeadline: Codable, Sendable, Hashable, Identifiable {
         self.sourceName = sourceName
         self.publishedAt = publishedAt
         self.weight = weight
+        self.feedIdentifier = feedIdentifier
+        self.category = category
+        self.sourcePriority = sourcePriority
+        self.rankingExplanation = rankingExplanation
     }
 }
 

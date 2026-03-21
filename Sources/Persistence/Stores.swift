@@ -126,6 +126,40 @@ public actor WeatherSettingsStore {
     }
 }
 
+public actor NewsSettingsStore {
+    private let coordinator: ReadyRoomStorageCoordinator
+    private let path = "Shared/news-settings.json"
+
+    public init(coordinator: ReadyRoomStorageCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    public func load() async throws -> NewsSettings {
+        (try await coordinator.loadJSON(NewsSettings.self, relativePath: path, scope: .shared) ?? NewsSettings()).normalized()
+    }
+
+    public func save(_ settings: NewsSettings) async throws {
+        try await coordinator.saveJSON(settings.normalized(), relativePath: path, scope: .shared)
+    }
+}
+
+public actor LastGoodNewsSnapshotStore {
+    private let coordinator: ReadyRoomStorageCoordinator
+    private let path = "Local/last-good-news.json"
+
+    public init(coordinator: ReadyRoomStorageCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    public func load() async throws -> LastGoodNewsSnapshot? {
+        try await coordinator.loadJSON(LastGoodNewsSnapshot.self, relativePath: path, scope: .local)
+    }
+
+    public func save(_ snapshot: LastGoodNewsSnapshot) async throws {
+        try await coordinator.saveJSON(snapshot, relativePath: path, scope: .local)
+    }
+}
+
 public actor PersonColorPaletteSettingsStore {
     private let coordinator: ReadyRoomStorageCoordinator
     private let path = "Shared/person-color-palette.json"

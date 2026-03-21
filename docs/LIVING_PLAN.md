@@ -17,7 +17,7 @@ Build a macOS-native dashboard and daily briefing app for household/work operati
 | S1 | Core models, rules, persistence boundaries | In Progress |
 | S2 | Dashboard shell + preview shell | In Progress |
 | S3 | Deterministic briefings + sender coordination | In Progress |
-| S4 | Live connectors + setup + operational polish | Pending |
+| S4 | Live connectors + setup + operational polish | In Progress |
 
 ## Current Snapshot
 
@@ -52,15 +52,20 @@ Implemented in this foundation pass:
 - `New or Changed` calendar state now uses a machine-local persisted baseline so previously seen events stay stable across app restarts instead of resetting to `new` on each relaunch
 - calendar location URLs for Zoom and Teams meetings now surface as friendly labels instead of dumping raw meeting links into the dashboard and briefings
 - Weather now has a real shared configuration screen: it defaults to ZIP `08854`, resolves ZIP or city/state input through Apple location search, fetches live conditions from Open-Meteo, and shows an SF Symbol in the dashboard instead of sample placeholder weather
+- News now has a real shared configuration screen with a seeded starter bundle of official RSS/Atom feeds, optional manual local feeds, shared-base-plus-override profile controls for Dashboard/John/Amy, and an easy apply-base-to-all path
+- live news refresh now fetches configured feeds on startup, manual refresh, pre-send refresh, and a bounded while-open cadence; failures surface as `stale` or `unavailable` while reusing the last good cached headlines instead of silently dropping back to sample content
+- news ranking is now deterministic and inspectable: feed priority, dedupe clustering, recency decay, and per-surface feed boosts produce separate ranked outputs for the dashboard, John's briefing, and Amy's briefing from one fetch pass
+- dashboard news headlines now open the real article URL in the default browser
 - `docs/WHERE_WE_STAND.md` now captures the current implemented/partial/missing status and should be regenerated on future major or minor version bumps
 
 Still open after this pass:
 
-- richer live connector configuration and authentication UX beyond weather's Apple-location/Open-Meteo hybrid path
+- richer live connector configuration and authentication UX beyond weather/news's current path
 - production-grade Foundation Models prompt integration
 - full setup wizard persistence and permissions UX
 - app bundling/signing refinement and runtime smoke-testing against real local services
 - OAuth-grade SMTP auth and broader provider-specific setup guidance beyond basic username/app-password flows
+- real live media connectors and settings beyond today's sample media placeholder path
 
 ## Decisions Log
 

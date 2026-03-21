@@ -105,6 +105,41 @@ public enum WeatherSourceSnapshotFactory {
     }
 }
 
+public enum NewsSourceSnapshotFactory {
+    public static let source = SourceDescriptor(id: "rss", displayName: "News", type: .news)
+
+    public static func unconfigured(message: String, fetchedAt: Date = .now) -> SourceSnapshot {
+        SourceSnapshot(
+            source: source,
+            fetchedAt: fetchedAt,
+            health: SourceHealth(status: .unconfigured, message: message, freshnessBudget: 7200)
+        )
+    }
+
+    public static func unavailable(message: String, fetchedAt: Date = .now) -> SourceSnapshot {
+        SourceSnapshot(
+            source: source,
+            fetchedAt: fetchedAt,
+            health: SourceHealth(status: .unavailable, message: message, freshnessBudget: 7200)
+        )
+    }
+
+    public static func stale(
+        headlines: [NewsHeadline],
+        message: String,
+        fetchedAt: Date = .now,
+        lastGoodFetchAt: Date?
+    ) -> SourceSnapshot {
+        SourceSnapshot(
+            source: source,
+            fetchedAt: fetchedAt,
+            lastGoodFetchAt: lastGoodFetchAt,
+            health: SourceHealth(status: .stale, message: message, lastSuccessAt: lastGoodFetchAt, freshnessBudget: 7200),
+            headlines: headlines
+        )
+    }
+}
+
 public enum OpenMeteoWeatherCodeMapper {
     public static func summary(for weatherCode: Int) -> String {
         switch weatherCode {
@@ -222,29 +257,106 @@ private struct OpenMeteoPayload: Decodable {
 }
 
 public actor RSSNewsConnector: SourceConnector {
-    public let source = SourceDescriptor(id: "rss", displayName: "News", type: .news)
-    private let feedURLs: [URL]
+    public let source = NewsSourceSnapshotFactory.source
+    private let feeds: [ConfiguredNewsFeed]
     private let session: URLSession
 
-    public init(feedURLs: [URL], session: URLSession = .shared) {
-        self.feedURLs = feedURLs
+    public init(feeds: [ConfiguredNewsFeed], session: URLSession = .shared) {
+        self.feeds = feeds
         self.session = session
     }
 
     public func refresh() async throws -> SourceSnapshot {
-        var headlines: [NewsHeadline] = []
-        for url in feedURLs {
-            let (data, _) = try await session.data(from: url)
-            let parser = RSSFeedParser(sourceName: url.host ?? "Feed")
-            headlines.append(contentsOf: parser.parse(data: data))
+        let enabledFeeds = feeds.filter(\.isEnabled)
+        guard enabledFeeds.isEmpty == false else {
+            throw RSSNewsConnectorError.noEnabledFeeds
         }
+        let session = self.session
+
+        var headlines: [NewsHeadline] = []
+        var failedFeeds: [String] = []
+
+        await withTaskGroup(of: RSSFeedRefreshResult.self) { group in
+            for feed in enabledFeeds {
+                group.addTask {
+                    guard let url = feed.resolvedURL else {
+                        return RSSFeedRefreshResult(feedLabel: feed.label, headlines: [], errorMessage: "invalid URL")
+                    }
+                    do {
+                        let (data, _) = try await session.data(from: url)
+                        let parser = RSSFeedParser(sourceName: feed.label)
+                        let parsedHeadlines = parser.parse(data: data).map { headline in
+                            NewsHeadline(
+                                title: headline.title,
+                                summary: headline.summary,
+                                url: headline.url,
+                                sourceName: feed.label,
+                                publishedAt: headline.publishedAt,
+                                weight: headline.weight,
+                                feedIdentifier: feed.id,
+                                category: feed.category,
+                                sourcePriority: feed.sourcePriority
+                            )
+                        }
+                        return RSSFeedRefreshResult(feedLabel: feed.label, headlines: parsedHeadlines, errorMessage: nil)
+                    } catch {
+                        return RSSFeedRefreshResult(feedLabel: feed.label, headlines: [], errorMessage: error.localizedDescription)
+                    }
+                }
+            }
+
+            for await result in group {
+                if let errorMessage = result.errorMessage {
+                    failedFeeds.append("\(result.feedLabel): \(errorMessage)")
+                }
+                headlines.append(contentsOf: result.headlines)
+            }
+        }
+
+        guard headlines.isEmpty == false else {
+            if failedFeeds.isEmpty {
+                throw RSSNewsConnectorError.noHeadlines
+            }
+            throw RSSNewsConnectorError.fetchFailed(failedFeeds.joined(separator: " "))
+        }
+
+        let healthMessage: String?
+        if failedFeeds.isEmpty {
+            healthMessage = nil
+        } else {
+            healthMessage = "Fetched \(headlines.count) headline(s). Some feeds failed: \(failedFeeds.joined(separator: " | "))"
+        }
+
         return SourceSnapshot(
             source: source,
             fetchedAt: .now,
             lastGoodFetchAt: .now,
-            health: SourceHealth(status: .healthy, lastSuccessAt: .now, freshnessBudget: 7200),
+            health: SourceHealth(status: .healthy, message: healthMessage, lastSuccessAt: .now, freshnessBudget: 7200),
             headlines: headlines.sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
         )
+    }
+}
+
+private struct RSSFeedRefreshResult {
+    let feedLabel: String
+    let headlines: [NewsHeadline]
+    let errorMessage: String?
+}
+
+private enum RSSNewsConnectorError: LocalizedError {
+    case noEnabledFeeds
+    case noHeadlines
+    case fetchFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .noEnabledFeeds:
+            "No enabled RSS or Atom feeds are configured."
+        case .noHeadlines:
+            "Configured feeds returned no headlines."
+        case .fetchFailed(let detail):
+            "News feeds could not be fetched. \(detail)"
+        }
     }
 }
 
@@ -285,7 +397,7 @@ private final class RSSFeedParser: NSObject, XMLParserDelegate {
         switch currentElement {
         case "title":
             currentTitle += string
-        case "description", "summary", "content":
+        case "description", "summary", "content", "content:encoded":
             currentSummary += string
         case "link":
             currentLink += string

@@ -31,7 +31,8 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - obligations appear in the timeline as all-day items
 - due-soon card shows remaining days
 - timeline items now show subtle person-based accent rails and pills for John, Amy, Ellie, and Mia
-- placeholder data is clearly labeled in the dashboard and debug views
+- placeholder data is clearly labeled in the dashboard and debug views when a source is still sample-backed
+- dashboard news now shows ranked live headlines from configured RSS/Atom feeds, with clickable article links that open in the default browser
 
 ### Obligations
 - YAML-backed obligations storage
@@ -73,8 +74,10 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - EventKit calendars are partly real and actively used
 - weather now has a real configuration screen and live data path
 - weather location resolves through Apple location search and current conditions come from Open-Meteo
-- news and media are still mostly placeholder-driven in normal use
-- configuration UX for news and media is still mostly missing
+- news now has a real shared configuration screen, starter official feeds, optional manual local feeds, and deterministic per-surface ranking for dashboard/John/Amy
+- news now refreshes on startup, manual refresh, scheduled-send prep, every 30 minutes for calendar/obligations, and every 60 minutes for news/weather while the app stays open
+- media is still mostly placeholder-driven in normal use
+- configuration UX for media is still mostly missing
 
 ### AI
 - templated fallback works
@@ -84,7 +87,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 ### Settings / Preferences
 - the sidebar structure exists
-- sender, storage/sync, and weather are meaningfully usable
+- sender, storage/sync, weather, and news are meaningfully usable
 - dashboard settings now include shared person-color customization with a live preview and reset-to-defaults control
 - sender settings now include SMTP server details, sender selection, and local Keychain-backed password status
 - most other settings pages are still placeholders or explanatory shells
@@ -92,6 +95,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 ### Debuggability
 - source health is visible
 - raw normalized payload inspection exists
+- ranked news weights and feed settings now show up in the debug payload
 - but logs, source test buttons, resend tools, and richer debug workflows are not there yet
 
 ### Dashboard Mode / Operational Polish
@@ -136,8 +140,9 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 ## Known Limitations And Trust Warnings
 
-- News and media may still be placeholder data unless explicitly wired to live sources.
+- Media may still be placeholder data unless explicitly wired to live sources.
 - Weather now has a live path, but it depends on Apple location resolution succeeding and Open-Meteo being reachable.
+- News now has a live path, but it depends on configured publisher feeds remaining reachable and parseable; when feeds fail, Ready Room falls back to the last good cached headlines and marks the source stale or unavailable instead of pretending sample news is current.
 - Foundation Models is not really implemented yet.
 - SMTP delivery currently assumes username/app-password style auth; OAuth-specific provider flows are not implemented.
 - Apple Mail still sends the readable plain-text compatibility version, not a fully rendered HTML email, when fallback is used.
@@ -162,13 +167,14 @@ To get useful daily behavior right now:
 - Morning send reliability is better than before, but still needs more real-world validation.
 - SMTP setup is partly shared and partly local: host/user/from settings sync, but each Mac needs its own local Keychain password.
 - Cross-Mac coordination is practical, not fully hardened.
-- Placeholder data can still leak into daily use for news and media because those connectors are not fully configured yet.
+- Placeholder data can still leak into daily use for media because that connector is not fully configured yet.
+- Placeholder data can still leak into daily use for media because that connector is not fully configured yet.
 - Some configuration areas exist in the data model but not yet in a real user-facing workflow.
 - Person-based audience colors are configurable now, but the broader calendar management and override UI is still incomplete.
 
 ## Recommended Next Priorities
 
-1. Make live news/media actually usable with real configuration screens.
+1. Make live media actually usable with a real configuration screen and live connector path.
 2. Improve sender reliability and diagnostics so morning-send failures are obvious and recoverable.
 3. Build the real setup wizard and permissions guidance.
 4. Add notifications and archive/history UI.

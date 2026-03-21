@@ -269,7 +269,7 @@ struct SettingsView: View {
                     case .weather:
                         WeatherSettingsView(model: model)
                     case .news:
-                        settingsCard("News", body: "RSS/Atom feed sources and recipient weighting will be configured here.")
+                        NewsSettingsView(model: model)
                     case .media:
                         settingsCard("Media", body: "Plex, Tautulli, Sonarr, and Radarr configuration belongs here.")
                     case .storageSync:
@@ -508,6 +508,293 @@ private struct WeatherSettingsView: View {
 
     private func syncFromModel() {
         locationQuery = model.weatherSettings.locationQuery
+    }
+}
+
+private struct NewsSettingsView: View {
+    @ObservedObject var model: ReadyRoomAppModel
+    @State private var draft = NewsSettings()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("News")
+                    .font(.headline)
+                Text("Ready Room fetches live headlines from official RSS and Atom feeds. One shared base profile controls the default mix, and Dashboard/John/Amy can optionally override that mix when you need them to diverge.")
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Feed Library")
+                        .font(.headline)
+                    Spacer()
+                    Button("Add Manual Feed") {
+                        draft.feeds.append(
+                            ConfiguredNewsFeed(
+                                label: "Local feed",
+                                feedURLString: "https://",
+                                category: .local,
+                                sourcePriority: 1.0,
+                                isEnabled: true,
+                                isUserAdded: true
+                            )
+                        )
+                    }
+                }
+
+                Text("Starter feeds seed real news automatically. Manual local feeds are opt-in and stay fully editable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ForEach(Array(draft.feeds.indices), id: \.self) { index in
+                    NewsFeedEditorRow(
+                        feed: bindingForFeed(at: index),
+                        remove: {
+                            draft.feeds.remove(at: index)
+                        }
+                    )
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            NewsProfileEditor(
+                title: "Shared Base Profile",
+                subtitle: "These include/exclude and boost controls apply everywhere unless a surface override is turned on.",
+                profile: $draft.baseProfile,
+                feeds: draft.feeds
+            )
+
+            NewsSurfaceOverrideEditor(
+                title: "Dashboard Override",
+                surfaceLabel: NewsSurface.dashboard.displayName,
+                overrideProfile: Binding(
+                    get: { draft.dashboardOverride },
+                    set: { draft.dashboardOverride = $0 }
+                ),
+                baseProfile: draft.baseProfile,
+                feeds: draft.feeds
+            )
+
+            NewsSurfaceOverrideEditor(
+                title: "John Override",
+                surfaceLabel: NewsSurface.john.displayName,
+                overrideProfile: Binding(
+                    get: { draft.johnOverride },
+                    set: { draft.johnOverride = $0 }
+                ),
+                baseProfile: draft.baseProfile,
+                feeds: draft.feeds
+            )
+
+            NewsSurfaceOverrideEditor(
+                title: "Amy Override",
+                surfaceLabel: NewsSurface.amy.displayName,
+                overrideProfile: Binding(
+                    get: { draft.amyOverride },
+                    set: { draft.amyOverride = $0 }
+                ),
+                baseProfile: draft.baseProfile,
+                feeds: draft.feeds
+            )
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Button("Apply Base To All Surfaces") {
+                        draft = draft.applyingBaseToAllSurfaces()
+                    }
+                    Button("Save News Settings") {
+                        Task { await model.saveNewsSettings(draft) }
+                    }
+                    Button("Refresh News") {
+                        Task { await model.refreshNewsNow() }
+                    }
+                }
+                Text(model.newsSettingsStatusMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let newsError = model.newsSettingsError {
+                    Text(newsError)
+                        .foregroundStyle(.red)
+                }
+                if let sourceMessage = model.sourceMessage(for: .news) {
+                    Text(sourceMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .onAppear {
+            syncFromModel()
+        }
+        .onChange(of: model.newsSettings) { _, _ in
+            syncFromModel()
+        }
+    }
+
+    private func bindingForFeed(at index: Int) -> Binding<ConfiguredNewsFeed> {
+        Binding(
+            get: { draft.feeds[index] },
+            set: { draft.feeds[index] = $0 }
+        )
+    }
+
+    private func syncFromModel() {
+        draft = model.newsSettings
+    }
+}
+
+private struct NewsFeedEditorRow: View {
+    @Binding var feed: ConfiguredNewsFeed
+    let remove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(feed.isUserAdded ? "Manual Feed" : "Starter Feed")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Remove", role: .destructive, action: remove)
+            }
+            TextField("Feed label", text: $feed.label)
+                .textFieldStyle(.roundedBorder)
+            TextField("Feed URL", text: $feed.feedURLString)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Picker("Category", selection: $feed.category) {
+                    ForEach(NewsCategory.allCases, id: \.self) { category in
+                        Text(category.displayName).tag(category)
+                    }
+                }
+                Toggle("Enabled", isOn: $feed.isEnabled)
+            }
+            HStack {
+                Text("Source Priority")
+                    .font(.caption.weight(.semibold))
+                Slider(value: $feed.sourcePriority, in: 0.5...2.0, step: 0.05)
+                Text(String(format: "%.2f", feed.sourcePriority))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct NewsProfileEditor: View {
+    let title: String
+    let subtitle: String
+    @Binding var profile: NewsProfile
+    let feeds: [ConfiguredNewsFeed]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(feeds) { feed in
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(feed.label, isOn: includeBinding(for: feed.id))
+                    HStack {
+                        Text("Boost")
+                            .font(.caption.weight(.semibold))
+                        Slider(value: boostBinding(for: feed.id), in: -0.5...0.75, step: 0.05)
+                        Text(String(format: "%+.2f", profile.boost(for: feed.id)))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(feed.feedURLString)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func includeBinding(for feedID: String) -> Binding<Bool> {
+        Binding(
+            get: { profile.includes(feedID: feedID) },
+            set: { include in
+                var included = Set(profile.includedFeedIDs)
+                if include {
+                    included.insert(feedID)
+                } else {
+                    included.remove(feedID)
+                }
+                profile.includedFeedIDs = included.sorted()
+            }
+        )
+    }
+
+    private func boostBinding(for feedID: String) -> Binding<Double> {
+        Binding(
+            get: { profile.boost(for: feedID) },
+            set: { value in
+                if abs(value) < 0.001 {
+                    profile.feedBoosts.removeValue(forKey: feedID)
+                } else {
+                    profile.feedBoosts[feedID] = value
+                }
+            }
+        )
+    }
+}
+
+private struct NewsSurfaceOverrideEditor: View {
+    let title: String
+    let surfaceLabel: String
+    @Binding var overrideProfile: NewsProfile?
+    let baseProfile: NewsProfile
+    let feeds: [ConfiguredNewsFeed]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            Toggle(
+                "Use a custom \(surfaceLabel.lowercased()) override",
+                isOn: Binding(
+                    get: { overrideProfile != nil },
+                    set: { enabled in
+                        overrideProfile = enabled ? baseProfile : nil
+                    }
+                )
+            )
+            if overrideProfile != nil {
+                NewsProfileEditor(
+                    title: "\(surfaceLabel) Profile",
+                    subtitle: "This surface now diverges from the shared base profile.",
+                    profile: Binding(
+                        get: { overrideProfile ?? baseProfile },
+                        set: { overrideProfile = $0 }
+                    ),
+                    feeds: feeds
+                )
+            } else {
+                Text("\(surfaceLabel) is using the shared base profile.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 

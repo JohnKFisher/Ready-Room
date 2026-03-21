@@ -215,10 +215,31 @@ struct DashboardView: View {
                             Text(model.sourceMessage(for: .weather) ?? "Weather source unavailable.")
                         }
                     case .news:
-                        Text(model.previewArtifacts[.john]?[model.preferredMode]?.sections.first(where: { $0.title == "In The World" })?.body ?? "No news summary yet.")
+                        Text(model.dashboardNewsSummaryText)
                         ForEach(model.headlines.prefix(2)) { headline in
-                            Text(headline.title)
-                                .font(.subheadline.weight(.medium))
+                            if let url = headline.url {
+                                Link(destination: url) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(headline.title)
+                                            .font(.subheadline.weight(.medium))
+                                            .multilineTextAlignment(.leading)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Text(headline.sourceName)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(headline.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text(headline.sourceName)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     case .media:
                         ForEach(model.mediaItems.prefix(4)) { item in

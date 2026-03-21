@@ -74,6 +74,9 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var weatherSettings = WeatherSettings()
     @Published var weatherSettingsStatusMessage = "Weather uses Apple location lookup and Open-Meteo forecasts."
     @Published var weatherSettingsError: String?
+    @Published var newsSettings = NewsSettings()
+    @Published var newsSettingsStatusMessage = "Ready Room uses official RSS and Atom feeds for live news."
+    @Published var newsSettingsError: String?
     @Published var personColorPaletteSettings = PersonColorPaletteSettings.default
     @Published var personColorPaletteStatusMessage = "Audience colors are shared across Macs and used in the dashboard and briefings."
     @Published var personColorPaletteError: String?
@@ -85,6 +88,7 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var lastGeneratedPreviewAudience: BriefingAudience = .john
     @Published var sendRecords: [SendExecutionRecord] = []
     @Published var smtpPasswordStored = false
+    @Published var dashboardNewsSummaryText = "No news items made the cut this morning."
 
     private let storageCoordinator = ReadyRoomStorageCoordinator()
     private lazy var layoutStore = DashboardLayoutStore(coordinator: storageCoordinator)
@@ -96,9 +100,13 @@ final class ReadyRoomAppModel: ObservableObject {
     private lazy var sendRegistryStore = SendRegistryStore(coordinator: storageCoordinator)
     private lazy var senderSettingsStore = SenderSettingsStore(coordinator: storageCoordinator)
     private lazy var weatherSettingsStore = WeatherSettingsStore(coordinator: storageCoordinator)
+    private lazy var newsSettingsStore = NewsSettingsStore(coordinator: storageCoordinator)
+    private lazy var lastGoodNewsSnapshotStore = LastGoodNewsSnapshotStore(coordinator: storageCoordinator)
     private lazy var personColorPaletteStore = PersonColorPaletteSettingsStore(coordinator: storageCoordinator)
     private lazy var machineIdentityStore = MachineIdentityStore(coordinator: storageCoordinator)
     private let rulesEngine = ReadyRoomRulesEngine()
+    private let newsRanker = DeterministicNewsRanker()
+    private let periodicRefreshPlanner = PeriodicRefreshPlanner()
     private let parser = PlainEnglishObligationParser()
     private let sendCoordinator = ScheduledSendCoordinator()
     private let senderDispatchCoordinator = SenderDispatchCoordinator()
@@ -114,6 +122,12 @@ final class ReadyRoomAppModel: ObservableObject {
     ]
     private var lastSeenCalendarItems: [String: NormalizedItem] = [:]
     private var refreshWarning: String?
+    private var rankedHeadlinesByAudience: [BriefingAudience: [NewsHeadline]] = [:]
+    private var lastGoodNewsSnapshot: LastGoodNewsSnapshot?
+    private var refreshRequestQueue = RefreshRequestQueue()
+    private var refreshInFlight = false
+    private var lastCalendarAndObligationsRefreshAt: Date?
+    private var lastNewsAndWeatherRefreshAt: Date?
 
     init() {
         Task {
@@ -135,28 +149,23 @@ final class ReadyRoomAppModel: ObservableObject {
             sendRecords = try await sendRegistryStore.load()
             await refreshSMTPPasswordStored(for: senderSettings.smtp)
             weatherSettings = try await weatherSettingsStore.load()
+            newsSettings = try await newsSettingsStore.load()
             personColorPaletteSettings = try await personColorPaletteStore.load()
+            lastGoodNewsSnapshot = try await lastGoodNewsSnapshotStore.load()
             await ensureWeatherSettingsResolvedIfNeeded()
             obligations = try await obligationsStore.load()
             lastKnownObligationsModifiedAt = try await obligationsStore.modificationDate()
             await refreshStorageStatus()
-            await refresh()
+            await enqueueRefresh(.allSources)
+            await evaluateScheduledSendsIfNeeded()
         } catch {
             statusMessage = "Bootstrap failed: \(error.localizedDescription)"
         }
     }
 
     func refresh() async {
-        statusMessage = quietHours.isActive(at: now) ? "Quiet hours active." : "Refreshing sources..."
-        await syncWeatherSettingsFromStore()
-        await syncPersonColorPaletteFromStore()
-        _ = await syncSharedObligations(force: true)
-        let snapshots = await collectSnapshots()
-        sourceSnapshots = snapshots
-        await applySnapshots(snapshots)
-        await generateNarrativesAndPreviews()
-        updateDebugJSON()
-        statusMessage = refreshWarning ?? "Ready"
+        now = Date()
+        await enqueueRefresh(.allSources)
         await evaluateScheduledSendsIfNeeded()
     }
 
@@ -242,6 +251,17 @@ final class ReadyRoomAppModel: ObservableObject {
         return snapshot?.health.message ?? snapshot?.placeholderLabel
     }
 
+    func rankedHeadlines(for surface: NewsSurface) -> [NewsHeadline] {
+        switch surface {
+        case .dashboard:
+            headlines
+        case .john:
+            rankedHeadlinesByAudience[.john] ?? []
+        case .amy:
+            rankedHeadlinesByAudience[.amy] ?? []
+        }
+    }
+
     func refreshStorageStatus() async {
         do {
             storagePreferences = try await storageCoordinator.loadStoragePreferences()
@@ -301,13 +321,57 @@ final class ReadyRoomAppModel: ObservableObject {
     func refreshWeatherNow() async {
         weatherSettingsError = nil
         weatherSettingsStatusMessage = "Refreshing weather..."
-        await refresh()
+        await enqueueRefresh(.newsAndWeather)
         if let message = sourceMessage(for: .weather) {
             weatherSettingsStatusMessage = message
         } else if let resolvedDisplayName = weatherSettings.resolvedDisplayName {
             weatherSettingsStatusMessage = "Weather refreshed for \(resolvedDisplayName)."
         } else {
             weatherSettingsStatusMessage = "Weather refreshed."
+        }
+    }
+
+    func saveNewsSettings(_ settings: NewsSettings) async {
+        let normalized = settings.normalized()
+        let validationProblems = validateNewsFeeds(normalized.feeds)
+        guard validationProblems.isEmpty else {
+            newsSettingsError = validationProblems.joined(separator: " ")
+            newsSettingsStatusMessage = "News settings were not changed."
+            return
+        }
+
+        do {
+            try await newsSettingsStore.save(normalized)
+            newsSettings = normalized
+            newsSettingsError = nil
+            newsSettingsStatusMessage = "Saved news settings. Live headlines now come from your configured RSS and Atom feeds."
+            await enqueueRefresh(.news)
+            statusMessage = "Saved news settings."
+        } catch {
+            newsSettingsError = error.localizedDescription
+            newsSettingsStatusMessage = "News settings were not changed."
+            statusMessage = "Could not save news settings: \(error.localizedDescription)"
+        }
+    }
+
+    func applyBaseNewsProfileToAllSurfaces() async {
+        await saveNewsSettings(newsSettings.applyingBaseToAllSurfaces())
+        if newsSettingsError == nil {
+            newsSettingsStatusMessage = "Cleared custom news overrides. Dashboard, John, and Amy now use the shared base profile."
+            statusMessage = "Applied the base news profile to every surface."
+        }
+    }
+
+    func refreshNewsNow() async {
+        newsSettingsError = nil
+        newsSettingsStatusMessage = "Refreshing news..."
+        await enqueueRefresh(.news)
+        if let message = sourceMessage(for: .news) {
+            newsSettingsStatusMessage = message
+        } else if headlines.isEmpty {
+            newsSettingsStatusMessage = "No news items made the cut this refresh."
+        } else {
+            newsSettingsStatusMessage = "News refreshed."
         }
     }
 
@@ -445,6 +509,20 @@ final class ReadyRoomAppModel: ObservableObject {
         }
     }
 
+    private func syncNewsSettingsFromStore() async {
+        do {
+            let latestSettings = try await newsSettingsStore.load()
+            if latestSettings != newsSettings {
+                newsSettings = latestSettings
+            }
+            newsSettingsError = nil
+            newsSettingsStatusMessage = "Ready Room uses official RSS and Atom feeds for live news."
+        } catch {
+            newsSettingsError = error.localizedDescription
+            newsSettingsStatusMessage = "News settings need attention."
+        }
+    }
+
     private func syncPersonColorPaletteFromStore() async {
         do {
             let latestSettings = try await personColorPaletteStore.load()
@@ -522,6 +600,56 @@ final class ReadyRoomAppModel: ObservableObject {
         }
     }
 
+    private func newsSnapshot() async -> SourceSnapshot {
+        let normalizedSettings = newsSettings.normalized()
+        guard normalizedSettings.hasAnyEnabledFeed else {
+            return NewsSourceSnapshotFactory.unconfigured(
+                message: "Enable at least one RSS or Atom feed in Settings to show live news.",
+                fetchedAt: now
+            )
+        }
+
+        let connector = RSSNewsConnector(feeds: normalizedSettings.feeds)
+        do {
+            let snapshot = try await connector.refresh()
+            let lastGood = LastGoodNewsSnapshot(headlines: snapshot.headlines, fetchedAt: snapshot.fetchedAt)
+            lastGoodNewsSnapshot = lastGood
+            try? await lastGoodNewsSnapshotStore.save(lastGood)
+            return snapshot
+        } catch {
+            if let lastGoodNewsSnapshot, lastGoodNewsSnapshot.headlines.isEmpty == false {
+                return NewsSourceSnapshotFactory.stale(
+                    headlines: lastGoodNewsSnapshot.headlines,
+                    message: "News refresh failed: \(error.localizedDescription) Showing cached headlines from \(lastGoodNewsSnapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened)).",
+                    fetchedAt: now,
+                    lastGoodFetchAt: lastGoodNewsSnapshot.fetchedAt
+                )
+            }
+
+            return NewsSourceSnapshotFactory.unavailable(
+                message: "News refresh failed: \(error.localizedDescription)",
+                fetchedAt: now
+            )
+        }
+    }
+
+    private func validateNewsFeeds(_ feeds: [ConfiguredNewsFeed]) -> [String] {
+        var problems: [String] = []
+
+        for feed in feeds {
+            if feed.trimmedLabel.isEmpty {
+                problems.append("Every news feed needs a label.")
+                break
+            }
+            if feed.resolvedURL == nil {
+                problems.append("Every news feed needs a valid http or https URL.")
+                break
+            }
+        }
+
+        return problems
+    }
+
     func moveCard(_ kind: DashboardCardKind, direction: Int) {
         guard let index = cardLayout.cardOrder.firstIndex(of: kind) else {
             return
@@ -560,23 +688,86 @@ final class ReadyRoomAppModel: ObservableObject {
             now = Date()
             if await syncSharedObligations(force: false) {
                 statusMessage = "Shared obligations updated."
-                await refresh()
+                await enqueueRefresh(.timelineRelated)
                 continue
+            }
+            let dueComponents = periodicRefreshPlanner.dueComponents(
+                now: now,
+                lastCalendarAndObligationsRefreshAt: lastCalendarAndObligationsRefreshAt,
+                lastNewsAndWeatherRefreshAt: lastNewsAndWeatherRefreshAt
+            )
+            if dueComponents.isEmpty == false {
+                await enqueueRefresh(dueComponents)
             }
             await evaluateScheduledSendsIfNeeded()
         }
     }
 
-    private func collectSnapshots() async -> [SourceSnapshot] {
-        var snapshots = DevelopmentData.sampleSnapshots(referenceDate: now)
-        snapshots.append(await weatherSnapshot())
+    private func enqueueRefresh(_ components: RefreshComponents) async {
+        refreshRequestQueue.enqueue(components)
 
-        let calendarConnector = EventKitCalendarConnector()
-        if let liveCalendar = try? await calendarConnector.refresh(),
-           liveCalendar.health.status != .unauthorized,
-           !liveCalendar.calendarEvents.isEmpty {
-            snapshots.removeAll(where: { $0.source.id == "sample-calendar" })
-            snapshots.append(liveCalendar)
+        guard refreshInFlight == false else {
+            return
+        }
+
+        while let nextComponents = refreshRequestQueue.drain() {
+            refreshInFlight = true
+            await performRefresh(components: nextComponents)
+            refreshInFlight = false
+        }
+    }
+
+    private func performRefresh(components: RefreshComponents) async {
+        statusMessage = statusMessage(for: components)
+        await syncWeatherSettingsFromStore()
+        await syncNewsSettingsFromStore()
+        await syncPersonColorPaletteFromStore()
+        _ = await syncSharedObligations(force: components.contains(.obligations))
+        let snapshots = await collectSnapshots(refreshing: components)
+        sourceSnapshots = snapshots
+        await applySnapshots(snapshots)
+        await generateNarrativesAndPreviews()
+        updateDebugJSON()
+
+        if components.contains(.calendar) || components.contains(.obligations) {
+            lastCalendarAndObligationsRefreshAt = now
+        }
+        if components.contains(.news) || components.contains(.weather) {
+            lastNewsAndWeatherRefreshAt = now
+        }
+
+        statusMessage = refreshWarning ?? "Ready"
+    }
+
+    private func collectSnapshots(refreshing components: RefreshComponents) async -> [SourceSnapshot] {
+        var snapshots = sourceSnapshots
+        if snapshots.isEmpty {
+            snapshots = DevelopmentData.sampleSnapshots(referenceDate: now)
+        }
+
+        if components.contains(.weather) || snapshot(for: .weather) == nil {
+            replaceSnapshot(await weatherSnapshot(), in: &snapshots, type: .weather)
+        }
+
+        if components.contains(.news) || snapshot(for: .news) == nil {
+            replaceSnapshot(await newsSnapshot(), in: &snapshots, type: .news)
+        }
+
+        if components.contains(.calendar) || snapshot(for: .calendar) == nil {
+            let calendarConnector = EventKitCalendarConnector()
+            if let liveCalendar = try? await calendarConnector.refresh(),
+               liveCalendar.health.status != .unauthorized,
+               liveCalendar.calendarEvents.isEmpty == false {
+                replaceSnapshot(liveCalendar, in: &snapshots, type: .calendar)
+            } else if snapshots.contains(where: { $0.source.type == .calendar }) == false,
+                      let sampleCalendar = DevelopmentData.sampleSnapshots(referenceDate: now).first(where: { $0.source.type == .calendar }) {
+                snapshots.append(sampleCalendar)
+            }
+        }
+
+        if components.contains(.media), snapshots.contains(where: { $0.source.type == .media }) == false,
+           let sampleMedia = DevelopmentData.sampleSnapshots(referenceDate: now).first(where: { $0.source.type == .media }) {
+            snapshots.append(sampleMedia)
         }
 
         return snapshots
@@ -590,7 +781,17 @@ final class ReadyRoomAppModel: ObservableObject {
         let mediaSnapshot = snapshots.first(where: { $0.source.type == .media })
 
         weather = weatherSnapshot?.weather
-        headlines = newsSnapshot?.headlines ?? []
+        let rawNewsHeadlines = newsSnapshot?.headlines ?? []
+        headlines = newsRanker.rank(
+            headlines: rawNewsHeadlines,
+            settings: newsSettings,
+            surface: .dashboard
+        )
+        rankedHeadlinesByAudience = [
+            .john: newsRanker.rank(headlines: rawNewsHeadlines, settings: newsSettings, surface: .john),
+            .amy: newsRanker.rank(headlines: rawNewsHeadlines, settings: newsSettings, surface: .amy)
+        ]
+        dashboardNewsSummaryText = dashboardNewsSummary(from: headlines)
         mediaItems = mediaSnapshot?.mediaItems ?? []
 
         let configurations = (try? await calendarStore.load()) ?? []
@@ -630,10 +831,7 @@ final class ReadyRoomAppModel: ObservableObject {
         previewArtifacts = [:]
 
         let sourceStatuses = sourceSnapshots.map { $0.health.resolvedStatus(at: now) }
-        let weightedHeadlinesByAudience: [BriefingAudience: [NewsHeadline]] = [
-            .john: weightedHeadlines(for: .john),
-            .amy: weightedHeadlines(for: .amy)
-        ]
+        let rankedNewsByAudience = rankedHeadlinesByAudience
         let dueSoonByAudience: [BriefingAudience: [NormalizedItem]] = [
             .john: dueSoon.filter(\.inclusion.johnBriefing),
             .amy: dueSoon.filter(\.inclusion.amyBriefing)
@@ -666,7 +864,7 @@ final class ReadyRoomAppModel: ObservableObject {
                     date: now,
                     normalizedItems: normalizedItems,
                     weather: weather,
-                    headlines: weightedHeadlinesByAudience[audience] ?? [],
+                    headlines: rankedNewsByAudience[audience] ?? [],
                     mediaItems: mediaItems,
                     dueSoon: dueSoonByAudience[audience] ?? [],
                     preferredMode: mode,
@@ -690,12 +888,7 @@ final class ReadyRoomAppModel: ObservableObject {
     }
 
     private func weightedHeadlines(for audience: BriefingAudience) -> [NewsHeadline] {
-        switch audience {
-        case .john:
-            return headlines.sorted { ($0.weight + ($0.sourceName.lowercased().contains("sports") ? 0.2 : 0.0)) > $1.weight }
-        case .amy:
-            return headlines.sorted { ($0.weight + ($0.sourceName.lowercased().contains("news") ? 0.2 : 0.0)) > $1.weight }
-        }
+        rankedHeadlinesByAudience[audience] ?? []
     }
 
     private func defaultRecipients(for audience: BriefingAudience) -> [String] {
@@ -713,6 +906,9 @@ final class ReadyRoomAppModel: ObservableObject {
             normalizedItems: normalizedItems,
             dueSoon: dueSoon,
             conflicts: conflicts,
+            newsSettings: newsSettings,
+            dashboardHeadlines: headlines,
+            rankedHeadlinesByAudience: rankedHeadlinesByAudience,
             personColorPalette: personColorPaletteSettings,
             senderSettings: senderSettings,
             sendRecords: sendRecords
@@ -720,6 +916,35 @@ final class ReadyRoomAppModel: ObservableObject {
         if let data = try? encoder.encode(payload), let json = String(data: data, encoding: .utf8) {
             debugJSON = json
         }
+    }
+
+    private func replaceSnapshot(_ snapshot: SourceSnapshot, in snapshots: inout [SourceSnapshot], type: SourceType) {
+        snapshots.removeAll(where: { $0.source.type == type })
+        snapshots.append(snapshot)
+    }
+
+    private func dashboardNewsSummary(from headlines: [NewsHeadline]) -> String {
+        let selected = headlines.prefix(2).map(\.title)
+        if selected.isEmpty {
+            return "No news items made the cut this morning."
+        }
+        return selected.joined(separator: " Also worth noting: ")
+    }
+
+    private func statusMessage(for components: RefreshComponents) -> String {
+        if quietHours.isActive(at: now) {
+            return "Quiet hours active."
+        }
+        if components == .allSources {
+            return "Refreshing sources..."
+        }
+        if components == .timelineRelated {
+            return "Refreshing calendars and obligations..."
+        }
+        if components == .newsAndWeather {
+            return "Refreshing news and weather..."
+        }
+        return "Refreshing selected sources..."
     }
 
     private func evaluateScheduledSendsIfNeeded() async {
@@ -777,14 +1002,8 @@ final class ReadyRoomAppModel: ObservableObject {
     }
 
     private func refreshBriefingsForScheduledSend() async {
-        await syncWeatherSettingsFromStore()
-        await syncPersonColorPaletteFromStore()
-        _ = await syncSharedObligations(force: true)
-        let snapshots = await collectSnapshots()
-        sourceSnapshots = snapshots
-        await applySnapshots(snapshots)
-        await generateNarrativesAndPreviews()
-        updateDebugJSON()
+        now = Date()
+        await enqueueRefresh(.allSources)
     }
 
     private func persistSenderSettings(_ settings: SenderSettings, status: String) async {
@@ -909,6 +1128,9 @@ private struct DebugPayload: Encodable {
     let normalizedItems: [NormalizedItem]
     let dueSoon: [NormalizedItem]
     let conflicts: [ConflictMarker]
+    let newsSettings: NewsSettings
+    let dashboardHeadlines: [NewsHeadline]
+    let rankedHeadlinesByAudience: [BriefingAudience: [NewsHeadline]]
     let personColorPalette: PersonColorPaletteSettings
     let senderSettings: SenderSettings
     let sendRecords: [SendExecutionRecord]
@@ -967,18 +1189,6 @@ private enum DevelopmentData {
             calendarEvents: [johnWork, amyMeeting, schoolPickup]
         )
 
-        let newsSnapshot = SourceSnapshot(
-            source: SourceDescriptor(id: "sample-news", displayName: "News", type: .news),
-            fetchedAt: referenceDate,
-            lastGoodFetchAt: referenceDate,
-            health: SourceHealth(status: .healthy, lastSuccessAt: referenceDate, freshnessBudget: 7200),
-            placeholderLabel: "Sample news headlines",
-            headlines: [
-                NewsHeadline(title: "Markets open mixed as investors watch inflation data", sourceName: "AP", publishedAt: referenceDate, weight: 1.0),
-                NewsHeadline(title: "New family movie lands on streaming this weekend", sourceName: "Entertainment Weekly", publishedAt: referenceDate, weight: 0.8)
-            ]
-        )
-
         let mediaSnapshot = SourceSnapshot(
             source: SourceDescriptor(id: "sample-media", displayName: "Media", type: .media),
             fetchedAt: referenceDate,
@@ -991,7 +1201,7 @@ private enum DevelopmentData {
             ]
         )
 
-        return [calendarSnapshot, newsSnapshot, mediaSnapshot]
+        return [calendarSnapshot, mediaSnapshot]
     }
 }
 

@@ -1317,6 +1317,137 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func newsSettingsStoreSeedsStarterBundleWhenUnset() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let coordinator = ReadyRoomStorageCoordinator(
+            localRootOverride: root.appendingPathComponent("LocalRoot", isDirectory: true),
+            sharedRootOverride: root.appendingPathComponent("SharedRoot", isDirectory: true)
+        )
+        let store = NewsSettingsStore(coordinator: coordinator)
+
+        let loaded = try await store.load()
+
+        #expect(loaded.feeds.count == NewsSettings.starterFeeds.count)
+        #expect(loaded.feeds.map(\.id) == NewsSettings.starterFeeds.map(\.id))
+        #expect(Set(loaded.baseProfile.includedFeedIDs) == Set(loaded.feeds.filter(\.isEnabled).map(\.id)))
+    }
+
+    @Test
+    func newsSettingsApplyBaseToAllClearsOverridesButPreservesEffectiveProfiles() {
+        let settings = NewsSettings(
+            feeds: [
+                ConfiguredNewsFeed(id: "global", label: "Global", feedURLString: "https://example.com/global.xml", category: .general),
+                ConfiguredNewsFeed(id: "local", label: "Local", feedURLString: "https://example.com/local.xml", category: .local, isUserAdded: true)
+            ],
+            baseProfile: NewsProfile(includedFeedIDs: ["global"], feedBoosts: ["global": 0.15]),
+            dashboardOverride: NewsProfile(includedFeedIDs: ["global", "local"], feedBoosts: ["local": 0.2]),
+            johnOverride: NewsProfile(includedFeedIDs: ["global", "local"]),
+            amyOverride: NewsProfile(includedFeedIDs: ["global"])
+        )
+
+        let normalized = settings.applyingBaseToAllSurfaces()
+
+        #expect(normalized.dashboardOverride == nil)
+        #expect(normalized.johnOverride == nil)
+        #expect(normalized.amyOverride == nil)
+        #expect(normalized.effectiveProfile(for: .dashboard) == normalized.baseProfile.normalized(availableFeeds: normalized.feeds, includeNewFeedsByDefault: false))
+        #expect(normalized.effectiveProfile(for: .john) == normalized.baseProfile.normalized(availableFeeds: normalized.feeds, includeNewFeedsByDefault: false))
+        #expect(normalized.effectiveProfile(for: .amy) == normalized.baseProfile.normalized(availableFeeds: normalized.feeds, includeNewFeedsByDefault: false))
+    }
+
+    @Test
+    func deterministicNewsRankerPromotesClusteredImportantStoryOverNewerLowPrioritySingleSource() {
+        let now = Date()
+        let settings = NewsSettings(
+            feeds: [
+                ConfiguredNewsFeed(id: "important-1", label: "Important One", feedURLString: "https://example.com/important-1.xml", category: .general, sourcePriority: 1.2),
+                ConfiguredNewsFeed(id: "important-2", label: "Important Two", feedURLString: "https://example.com/important-2.xml", category: .general, sourcePriority: 1.1),
+                ConfiguredNewsFeed(id: "fresh-low", label: "Fresh Low", feedURLString: "https://example.com/fresh-low.xml", category: .entertainment, sourcePriority: 0.55)
+            ]
+        )
+        let ranker = DeterministicNewsRanker()
+        let headlines = [
+            NewsHeadline(
+                title: "Fed signals slower rate cuts as markets wobble",
+                sourceName: "Important One",
+                publishedAt: now.addingTimeInterval(-10 * 3600),
+                feedIdentifier: "important-1",
+                category: .general,
+                sourcePriority: 1.2
+            ),
+            NewsHeadline(
+                title: "Markets wobble as Fed signals slower rate cuts",
+                sourceName: "Important Two",
+                publishedAt: now.addingTimeInterval(-9 * 3600),
+                feedIdentifier: "important-2",
+                category: .general,
+                sourcePriority: 1.1
+            ),
+            NewsHeadline(
+                title: "Celebrity couple announces surprise weekend project",
+                sourceName: "Fresh Low",
+                publishedAt: now.addingTimeInterval(-1 * 3600),
+                feedIdentifier: "fresh-low",
+                category: .entertainment,
+                sourcePriority: 0.55
+            )
+        ]
+
+        let ranked = ranker.rank(headlines: headlines, settings: settings, surface: .dashboard)
+
+        #expect(ranked.first?.title.contains("Fed signals") == true || ranked.first?.title.contains("Markets wobble") == true)
+        #expect(ranked.first?.sourceName.contains("Important One") == true)
+        #expect(ranked.first?.sourceName.contains("Important Two") == true)
+    }
+
+    @Test
+    func deterministicNewsRankerCollapsesDuplicateHeadlinesIntoOneStory() {
+        let settings = NewsSettings(
+            feeds: [
+                ConfiguredNewsFeed(id: "a", label: "Source A", feedURLString: "https://example.com/a.xml", category: .world, sourcePriority: 1.0),
+                ConfiguredNewsFeed(id: "b", label: "Source B", feedURLString: "https://example.com/b.xml", category: .world, sourcePriority: 0.95)
+            ]
+        )
+        let ranker = DeterministicNewsRanker()
+        let headlines = [
+            NewsHeadline(title: "Storm tracks toward coast as evacuations begin", sourceName: "Source A", publishedAt: .now, feedIdentifier: "a", category: .world, sourcePriority: 1.0),
+            NewsHeadline(title: "Evacuations begin as storm tracks toward coast", sourceName: "Source B", publishedAt: .now.addingTimeInterval(-120), feedIdentifier: "b", category: .world, sourcePriority: 0.95)
+        ]
+
+        let ranked = ranker.rank(headlines: headlines, settings: settings, surface: .dashboard)
+
+        #expect(ranked.count == 1)
+        #expect(ranked[0].sourceName.contains("Source A"))
+        #expect(ranked[0].sourceName.contains("Source B"))
+    }
+
+    @Test
+    func manualLocalFeedOnlyInfluencesSelectedProfile() {
+        let feeds = [
+            ConfiguredNewsFeed(id: "global", label: "Global", feedURLString: "https://example.com/global.xml", category: .general, sourcePriority: 1.0),
+            ConfiguredNewsFeed(id: "local", label: "Local", feedURLString: "https://example.com/local.xml", category: .local, sourcePriority: 0.9, isUserAdded: true)
+        ]
+        let settings = NewsSettings(
+            feeds: feeds,
+            baseProfile: NewsProfile(includedFeedIDs: ["global"]),
+            johnOverride: NewsProfile(includedFeedIDs: ["global", "local"])
+        )
+        let ranker = DeterministicNewsRanker()
+        let headlines = [
+            NewsHeadline(title: "Global story", sourceName: "Global", publishedAt: .now, feedIdentifier: "global", category: .general, sourcePriority: 1.0),
+            NewsHeadline(title: "Town council approves new playground", sourceName: "Local", publishedAt: .now, feedIdentifier: "local", category: .local, sourcePriority: 0.9)
+        ]
+
+        let dashboardRanked = ranker.rank(headlines: headlines, settings: settings, surface: .dashboard)
+        let johnRanked = ranker.rank(headlines: headlines, settings: settings, surface: .john)
+
+        #expect(dashboardRanked.contains(where: { $0.title == "Town council approves new playground" }) == false)
+        #expect(johnRanked.contains(where: { $0.title == "Town council approves new playground" }))
+    }
+
+    @Test
     func openMeteoWeatherCodeMapperProvidesReadableSummariesAndSymbols() {
         #expect(OpenMeteoWeatherCodeMapper.summary(for: 0) == "Clear")
         #expect(OpenMeteoWeatherCodeMapper.symbolName(for: 0) == "sun.max.fill")
@@ -1335,6 +1466,30 @@ struct ReadyRoomFoundationTests {
         #expect(unconfigured.placeholderLabel == nil)
         #expect(unavailable.health.status == .unavailable)
         #expect(unavailable.health.message == "Weather request failed.")
+    }
+
+    @Test
+    func periodicRefreshPlannerUsesRequestedThirtyAndSixtyMinuteCadences() {
+        let planner = PeriodicRefreshPlanner()
+        let now = Calendar.readyRoomGregorian.date(from: DateComponents(year: 2026, month: 3, day: 21, hour: 10, minute: 0))!
+
+        let thirtyMinutesAgo = now.addingTimeInterval(-30 * 60)
+        let fiftyNineMinutesAgo = now.addingTimeInterval(-59 * 60)
+        let sixtyMinutesAgo = now.addingTimeInterval(-60 * 60)
+
+        #expect(planner.dueComponents(now: now, lastCalendarAndObligationsRefreshAt: thirtyMinutesAgo, lastNewsAndWeatherRefreshAt: fiftyNineMinutesAgo) == .timelineRelated)
+        #expect(planner.dueComponents(now: now, lastCalendarAndObligationsRefreshAt: thirtyMinutesAgo, lastNewsAndWeatherRefreshAt: sixtyMinutesAgo) == [.timelineRelated, .newsAndWeather])
+    }
+
+    @Test
+    func refreshRequestQueueMergesOverlappingRefreshesIntoSingleDrain() {
+        var queue = RefreshRequestQueue()
+        queue.enqueue(.news)
+        queue.enqueue(.timelineRelated)
+
+        #expect(queue.hasPending)
+        #expect(queue.drain() == [.news, .timelineRelated])
+        #expect(queue.drain() == nil)
     }
 
     @Test
