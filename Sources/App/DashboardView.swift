@@ -407,7 +407,7 @@ private struct TimelineItemView: View {
                     .help("Show more details")
                 }
             }
-            if let location = item.location {
+            if let location = item.displayLocation {
                 Text(location)
                     .foregroundStyle(.secondary)
             }

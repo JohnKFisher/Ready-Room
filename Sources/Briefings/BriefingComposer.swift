@@ -270,7 +270,7 @@ public struct BriefingComposer: Sendable {
         prefixStyle: BriefingItemPrefixStyle,
         calendarPlaceholderLabel: String? = nil
     ) -> String {
-        let location = item.location.map { " (\($0))" } ?? ""
+        let location = item.displayLocation.map { " (\($0))" } ?? ""
         let placeholderPrefix = item.sourceType == .calendar && calendarPlaceholderLabel != nil ? "[Placeholder] " : ""
         let content = [formattedItemPrefix(for: item, style: prefixStyle), placeholderPrefix + item.title + location]
             .filter { !$0.isEmpty }

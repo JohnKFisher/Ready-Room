@@ -596,6 +596,43 @@ public struct NormalizedItem: Codable, Sendable, Hashable, Identifiable {
         self.trace = trace
         self.metadata = metadata
     }
+
+    public var displayLocation: String? {
+        MeetingLocationDisplayFormatter.displayText(for: location)
+    }
+}
+
+public enum MeetingLocationDisplayFormatter {
+    public static func displayText(for location: String?) -> String? {
+        guard let location else {
+            return nil
+        }
+
+        let trimmed = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
+            return nil
+        }
+
+        let lowered = trimmed.lowercased()
+        if isZoomMeetingLink(lowered) {
+            return "Zoom Meeting"
+        }
+        if isTeamsMeetingLink(lowered) {
+            return "Teams Meeting"
+        }
+        return trimmed
+    }
+
+    private static func isZoomMeetingLink(_ lowered: String) -> Bool {
+        lowered.contains("zoom.us/") ||
+        lowered.contains("zoom.com/") ||
+        lowered.contains("zoomgov.com/")
+    }
+
+    private static func isTeamsMeetingLink(_ lowered: String) -> Bool {
+        lowered.contains("teams.microsoft.") ||
+        lowered.contains("teams.live.com/")
+    }
 }
 
 public struct ConflictMarker: Codable, Sendable, Hashable, Identifiable {

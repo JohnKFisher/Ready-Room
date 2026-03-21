@@ -227,6 +227,52 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func meetingLocationDisplayFormatterMapsZoomLinksToFriendlyLabel() {
+        let location = "https://homecarehomebase.zoom.us/w/95299310522?tk=example"
+
+        #expect(MeetingLocationDisplayFormatter.displayText(for: location) == "Zoom Meeting")
+    }
+
+    @Test
+    func meetingLocationDisplayFormatterMapsTeamsLinksToFriendlyLabel() {
+        let location = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_example"
+
+        #expect(MeetingLocationDisplayFormatter.displayText(for: location) == "Teams Meeting")
+    }
+
+    @Test
+    func briefingComposerUsesFriendlyMeetingLocationLabels() {
+        let calendar = Calendar.readyRoomGregorian
+        let item = NormalizedItem(
+            id: "calendar:zoom",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendar", type: .calendar),
+            sourceIdentifier: "zoom",
+            sourceType: .calendar,
+            title: "Pre-launch webinar",
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 12, minute: 0))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 13, minute: 0))!,
+            location: "https://homecarehomebase.zoom.us/w/95299310522?tk=example"
+        )
+        let request = BriefingRequest(
+            audience: .john,
+            date: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 6, minute: 30))!,
+            normalizedItems: [item],
+            weather: nil,
+            headlines: [],
+            mediaItems: [],
+            dueSoon: [],
+            preferredMode: .templated
+        )
+        let opening = GeneratedNarrative(text: "Today looks busy.", preferredMode: .templated, actualMode: .templated)
+        let news = GeneratedNarrative(text: "", preferredMode: .templated, actualMode: .templated)
+
+        let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
+
+        #expect(artifact.bodyHTML.contains("Zoom Meeting"))
+        #expect(artifact.bodyHTML.contains("homecarehomebase.zoom.us") == false)
+    }
+
+    @Test
     func briefingComposerIncludesAudienceChipsInMarkup() {
         let calendar = Calendar.readyRoomGregorian
         let source = SourceDescriptor(id: "calendar", displayName: "Calendar", type: .calendar)
