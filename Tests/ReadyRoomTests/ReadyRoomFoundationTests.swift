@@ -907,6 +907,78 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func calendarBaselineStoreRoundTripsNormalizedItems() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let coordinator = ReadyRoomStorageCoordinator(
+            localRootOverride: root.appendingPathComponent("LocalRoot", isDirectory: true),
+            sharedRootOverride: root.appendingPathComponent("SharedRoot", isDirectory: true)
+        )
+        let store = CalendarBaselineStore(coordinator: coordinator)
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let saved = [
+            NormalizedItem(
+                id: "calendar:event-1",
+                source: source,
+                sourceIdentifier: "event-1",
+                sourceType: .calendar,
+                title: "School pickup",
+                startDate: Date(timeIntervalSince1970: 1_710_000_000),
+                endDate: Date(timeIntervalSince1970: 1_710_003_600)
+            )
+        ]
+
+        try await store.save(saved)
+        let loaded = try await store.load()
+
+        #expect(loaded == saved)
+    }
+
+    @Test
+    func calendarEventsRemainUnchangedWhenBaselinePersistsAcrossRestart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let coordinator = ReadyRoomStorageCoordinator(
+            localRootOverride: root.appendingPathComponent("LocalRoot", isDirectory: true),
+            sharedRootOverride: root.appendingPathComponent("SharedRoot", isDirectory: true)
+        )
+        let store = CalendarBaselineStore(coordinator: coordinator)
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "event-1",
+            calendarIdentifier: "shared",
+            calendarTitle: "Family Shared",
+            title: "School pickup",
+            startDate: Date(timeIntervalSince1970: 1_710_000_000),
+            endDate: Date(timeIntervalSince1970: 1_710_003_600)
+        )
+
+        let firstPass = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+        #expect(firstPass.count == 1)
+        #expect(firstPass[0].changeState == .new)
+
+        try await store.save(firstPass)
+        let loadedBaseline = try await store.load()
+        let persistedBaseline = ReadyRoomCollections.dictionaryLastValueWins(
+            from: loadedBaseline.map { ($0.id, $0) }
+        )
+
+        let secondPass = engine.normalizeCalendarEvents(
+            [event],
+            source: source,
+            configurations: [:],
+            health: .healthy,
+            previousItems: persistedBaseline
+        )
+
+        #expect(secondPass.count == 1)
+        #expect(secondPass[0].changeState == .unchanged)
+    }
+
+    @Test
     func audienceAccentResolverReturnsSingleNamedPerson() {
         let accent = ItemAudienceAccentResolver.resolve(
             owner: .john,

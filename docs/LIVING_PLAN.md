@@ -49,6 +49,7 @@ Implemented in this foundation pass:
 - generated briefings now carry a prominent early-development warning banner and explicitly label placeholder-derived weather, news, media, and calendar content
 - scheduled-send dedupe now distinguishes manual test sends from scheduled sends, SMTP delivery now emits multipart plain-text-plus-HTML mail, and Apple Mail remains a readable compatibility fallback instead of receiving raw HTML tags
 - briefing sections now carry dated `Today`/`Tomorrow` headers, `Upcoming` day subheaders, and trailing audience initials so previewed and sent briefings stay readable without repeating the date on every row
+- `New or Changed` calendar state now uses a machine-local persisted baseline so previously seen events stay stable across app restarts instead of resetting to `new` on each relaunch
 - Weather now has a real shared configuration screen: it defaults to ZIP `08854`, resolves ZIP or city/state input through Apple location search, fetches live conditions from Open-Meteo, and shows an SF Symbol in the dashboard instead of sample placeholder weather
 - `docs/WHERE_WE_STAND.md` now captures the current implemented/partial/missing status and should be regenerated on future major or minor version bumps
 

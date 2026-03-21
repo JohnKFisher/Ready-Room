@@ -75,6 +75,23 @@ public actor DashboardLayoutStore {
     }
 }
 
+public actor CalendarBaselineStore {
+    private let coordinator: ReadyRoomStorageCoordinator
+    private let path = "Local/calendar-baseline.json"
+
+    public init(coordinator: ReadyRoomStorageCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    public func load() async throws -> [NormalizedItem] {
+        try await coordinator.loadJSON([NormalizedItem].self, relativePath: path, scope: .local) ?? []
+    }
+
+    public func save(_ items: [NormalizedItem]) async throws {
+        try await coordinator.saveJSON(items, relativePath: path, scope: .local)
+    }
+}
+
 public actor SenderSettingsStore {
     private let coordinator: ReadyRoomStorageCoordinator
     private let path = "Shared/sender-settings.json"

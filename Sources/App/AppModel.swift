@@ -88,6 +88,7 @@ final class ReadyRoomAppModel: ObservableObject {
 
     private let storageCoordinator = ReadyRoomStorageCoordinator()
     private lazy var layoutStore = DashboardLayoutStore(coordinator: storageCoordinator)
+    private lazy var calendarBaselineStore = CalendarBaselineStore(coordinator: storageCoordinator)
     private lazy var setupStore = SetupProgressStore(coordinator: storageCoordinator)
     private lazy var calendarStore = CalendarConfigurationStore(coordinator: storageCoordinator)
     private lazy var archiveStore = ArchiveStore(coordinator: storageCoordinator)
@@ -111,6 +112,8 @@ final class ReadyRoomAppModel: ObservableObject {
         .ollama: NarrativeGenerationPipeline(preferred: OllamaNarrativeGenerator()),
         .templated: NarrativeGenerationPipeline(preferred: TemplatedNarrativeGenerator())
     ]
+    private var lastSeenCalendarItems: [String: NormalizedItem] = [:]
+    private var refreshWarning: String?
 
     init() {
         Task {
@@ -121,6 +124,10 @@ final class ReadyRoomAppModel: ObservableObject {
     func bootstrap() async {
         do {
             cardLayout = try await layoutStore.load()
+            let storedCalendarBaseline = try await calendarBaselineStore.load()
+            lastSeenCalendarItems = ReadyRoomCollections.dictionaryLastValueWins(
+                from: storedCalendarBaseline.map { ($0.id, $0) }
+            )
             setupProgress = try await setupStore.load()
             machineIdentifier = try await machineIdentityStore.loadOrCreate()
             senderSettings = try await senderSettingsStore.load()
@@ -149,7 +156,7 @@ final class ReadyRoomAppModel: ObservableObject {
         await applySnapshots(snapshots)
         await generateNarrativesAndPreviews()
         updateDebugJSON()
-        statusMessage = "Ready"
+        statusMessage = refreshWarning ?? "Ready"
         await evaluateScheduledSendsIfNeeded()
     }
 
@@ -576,6 +583,7 @@ final class ReadyRoomAppModel: ObservableObject {
     }
 
     private func applySnapshots(_ snapshots: [SourceSnapshot]) async {
+        refreshWarning = nil
         let calendarSnapshot = snapshots.first(where: { $0.source.type == .calendar })
         let weatherSnapshot = snapshots.first(where: { $0.source.type == .weather })
         let newsSnapshot = snapshots.first(where: { $0.source.type == .news })
@@ -589,15 +597,12 @@ final class ReadyRoomAppModel: ObservableObject {
         let configMap = ReadyRoomCollections.dictionaryLastValueWins(
             from: configurations.map { ($0.calendarIdentifier, $0) }
         )
-        let previous = ReadyRoomCollections.dictionaryLastValueWins(
-            from: normalizedItems.map { ($0.id, $0) }
-        )
         let calendarItems = rulesEngine.normalizeCalendarEvents(
             calendarSnapshot?.calendarEvents ?? [],
             source: calendarSnapshot?.source ?? SourceDescriptor(id: "sample-calendar", displayName: "Sample Calendar", type: .calendar),
             configurations: configMap,
             health: calendarSnapshot?.health.resolvedStatus(at: now) ?? .healthy,
-            previousItems: previous
+            previousItems: lastSeenCalendarItems
         )
         let previousDueSoon = Set(dueSoon.map(\.sourceIdentifier))
         let dueSoonItems = rulesEngine.dueSoonObligations(
@@ -610,6 +615,14 @@ final class ReadyRoomAppModel: ObservableObject {
         normalizedItems = calendarItems
         dueSoon = dueSoonItems
         conflicts = rulesEngine.detectConflicts(in: calendarItems)
+        lastSeenCalendarItems = ReadyRoomCollections.dictionaryLastValueWins(
+            from: calendarItems.map { ($0.id, $0) }
+        )
+        do {
+            try await calendarBaselineStore.save(calendarItems)
+        } catch {
+            refreshWarning = "Could not save calendar baseline: \(error.localizedDescription)"
+        }
     }
 
     private func generateNarrativesAndPreviews() async {

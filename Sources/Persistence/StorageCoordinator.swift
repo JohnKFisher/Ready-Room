@@ -219,6 +219,7 @@ public actor ReadyRoomStorageCoordinator {
 
         let localFiles = try [
             fileStatus(label: "Dashboard Layout", relativePath: "Local/dashboard-layout.json", scope: .local),
+            fileStatus(label: "Calendar Baseline", relativePath: "Local/calendar-baseline.json", scope: .local),
             fileStatus(label: "Setup Progress", relativePath: "Local/setup-progress.json", scope: .local),
             fileStatus(label: "Machine Identity", relativePath: "Local/machine-identity.json", scope: .local),
             fileStatus(label: "Storage Preferences", relativePath: storagePreferencesPath, scope: .local)
