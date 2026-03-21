@@ -1,6 +1,6 @@
 # Ready Room: Where We Stand
 
-Updated for version `0.2.0 (20)`
+Updated for version `0.2.10 (30)`
 
 ## Overall Status
 
@@ -20,6 +20,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 ### Core Engine
 - normalized event and obligation model
 - rules-based relevance, ownership, work/home classification, due-soon handling, change tracking, and conflict detection
+- machine-local persisted calendar baseline keeps `New or Changed` stable across restarts
 - decision-trace structures for inspectability
 
 ### Dashboard
@@ -45,8 +46,9 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - preview screen works
 - compare-modes preview works
 - placeholder items are clearly labeled in the briefing
-- every event line now includes an explicit date
+- dated `Today`/`Tomorrow` headers and grouped `Upcoming` day headers now keep briefings readable without repeating the date on every line
 - briefing item rows now include subtle person chips using the shared audience-color palette
+- meeting-link locations now render as friendly labels such as `Zoom Meeting` and `Teams Meeting`
 - briefings include a strong early-development warning banner
 
 ### Sending / Scheduling
@@ -174,6 +176,6 @@ To get useful daily behavior right now:
 
 ## Latest Durable Rollback Point
 
-- `known-good/20260314-ready-room-0.2.0`
+- `known-good/20260321-ready-room-0.2.10`
 
 This is the current durable “last known good” anchor to return to if a later change breaks something important.
