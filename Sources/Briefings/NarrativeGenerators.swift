@@ -11,19 +11,34 @@ public struct TemplatedNarrativeGenerator: NarrativeGenerator {
         let familyCount = request.normalizedItems.filter { $0.lifeArea != .work }.count
         let dueSoonCount = request.dueSoon.count
         let line = "You have \(familyCount) family item(s), \(workCount) work item(s), and \(dueSoonCount) due-soon reminder(s) on deck."
-        return GeneratedNarrative(text: line, preferredMode: request.preferredMode, actualMode: mode, fallbackReason: request.preferredMode == mode ? nil : "Fell back to deterministic template.")
+        return GeneratedNarrative(
+            text: line,
+            preferredMode: request.preferredMode,
+            actualMode: mode,
+            fallbackReason: templatedFallbackReason(for: request.preferredMode)
+        )
     }
 
     public func generateNewsSummary(for request: BriefingRequest) async throws -> GeneratedNarrative {
         let selected = request.headlines.prefix(2).map(\.title)
         let line = selected.isEmpty ? "No news items made the cut this morning." : selected.joined(separator: " Also worth noting: ")
-        return GeneratedNarrative(text: line, preferredMode: request.preferredMode, actualMode: mode, fallbackReason: request.preferredMode == mode ? nil : "Fell back to deterministic template.")
+        return GeneratedNarrative(
+            text: line,
+            preferredMode: request.preferredMode,
+            actualMode: mode,
+            fallbackReason: templatedFallbackReason(for: request.preferredMode)
+        )
     }
 
     public func generateDashboardSummary(for context: DashboardSummaryContext, preferredMode: NarrativeGenerationMode) async throws -> GeneratedNarrative {
         let status = context.sourceStatuses.contains(.stale) ? "Some sources are stale." : "Sources look current."
         let line = "\(context.normalizedItems.count) items in the next week. \(context.dueSoon.count) due-soon reminders. \(status)"
-        return GeneratedNarrative(text: line, preferredMode: preferredMode, actualMode: mode, fallbackReason: preferredMode == mode ? nil : "Fell back to deterministic template.")
+        return GeneratedNarrative(
+            text: line,
+            preferredMode: preferredMode,
+            actualMode: mode,
+            fallbackReason: templatedFallbackReason(for: preferredMode)
+        )
     }
 }
 
@@ -103,11 +118,14 @@ public struct NarrativeGenerationPipeline: Sendable {
         do {
             return try await preferred.generateOpeningLine(for: request)
         } catch {
-            return (try? await fallback.generateOpeningLine(for: request)) ?? GeneratedNarrative(
+            if let fallbackNarrative = try? await fallback.generateOpeningLine(for: request) {
+                return fallbackNarrative
+            }
+            return GeneratedNarrative(
                 text: "Your briefing is ready.",
                 preferredMode: request.preferredMode,
                 actualMode: .templated,
-                fallbackReason: error.localizedDescription
+                fallbackReason: templatedFallbackReason(for: request.preferredMode)
             )
         }
     }
@@ -116,11 +134,14 @@ public struct NarrativeGenerationPipeline: Sendable {
         do {
             return try await preferred.generateNewsSummary(for: request)
         } catch {
-            return (try? await fallback.generateNewsSummary(for: request)) ?? GeneratedNarrative(
+            if let fallbackNarrative = try? await fallback.generateNewsSummary(for: request) {
+                return fallbackNarrative
+            }
+            return GeneratedNarrative(
                 text: "News summary unavailable.",
                 preferredMode: request.preferredMode,
                 actualMode: .templated,
-                fallbackReason: error.localizedDescription
+                fallbackReason: templatedFallbackReason(for: request.preferredMode)
             )
         }
     }
@@ -129,13 +150,26 @@ public struct NarrativeGenerationPipeline: Sendable {
         do {
             return try await preferred.generateDashboardSummary(for: context, preferredMode: preferredMode)
         } catch {
-            return (try? await fallback.generateDashboardSummary(for: context, preferredMode: preferredMode)) ?? GeneratedNarrative(
+            if let fallbackNarrative = try? await fallback.generateDashboardSummary(for: context, preferredMode: preferredMode) {
+                return fallbackNarrative
+            }
+            return GeneratedNarrative(
                 text: "Dashboard summary unavailable.",
                 preferredMode: preferredMode,
                 actualMode: .templated,
-                fallbackReason: error.localizedDescription
+                fallbackReason: templatedFallbackReason(for: preferredMode)
             )
         }
     }
 }
 
+private func templatedFallbackReason(for preferredMode: NarrativeGenerationMode) -> String? {
+    switch preferredMode {
+    case .templated:
+        return nil
+    case .foundationModels:
+        return "Ready Room used deterministic templating because Foundation Models generation is not live yet."
+    case .ollama:
+        return "Ready Room used deterministic templating instead of Ollama."
+    }
+}

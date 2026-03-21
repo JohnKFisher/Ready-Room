@@ -28,7 +28,7 @@ Implemented in this foundation pass:
 - rules engine for calendar relevance, work/home classification, due-soon logic, change tracking, and conflict detection
 - file-based shared/local storage scaffolding, YAML obligations store, Keychain-backed secrets, and send/archive stores
 - connector scaffolding for EventKit, weather, news, and Plex-family services
-- deterministic briefing composer with preferred-vs-actual AI mode disclosure
+- deterministic briefing composer with truthful preferred-vs-actual AI fallback disclosure
 - sender abstraction, scheduled-send coordination logic, an SMTP HTML sender path, and an Apple Mail compatibility fallback path
 - SwiftUI app shell for dashboard, preview, obligations, settings, and debug flows
 - obligations editor now supports post-parse field edits, inline explanation editing, and click-to-edit for saved items
@@ -48,7 +48,7 @@ Implemented in this foundation pass:
 - Sender settings are now shared config instead of hardcoded placeholder recipients, with explicit primary-sender designation, SMTP configuration, Keychain-backed per-Mac SMTP passwords, and fresh regeneration before scheduled morning sends
 - generated briefings now carry a prominent early-development warning banner and explicitly label placeholder-derived weather, news, media, and calendar content
 - scheduled-send dedupe now distinguishes manual test sends from scheduled sends, SMTP delivery now emits multipart plain-text-plus-HTML mail, and Apple Mail remains a readable compatibility fallback instead of receiving raw HTML tags
-- briefing event lines now include explicit dates as well as times so previewed and sent briefings are readable without relying on section context alone
+- briefing sections now carry dated `Today`/`Tomorrow` headers, `Upcoming` day subheaders, and trailing audience initials so previewed and sent briefings stay readable without repeating the date on every row
 - Weather now has a real shared configuration screen: it defaults to ZIP `08854`, resolves ZIP or city/state input through Apple location search, fetches live conditions from Open-Meteo, and shows an SF Symbol in the dashboard instead of sample placeholder weather
 - `docs/WHERE_WE_STAND.md` now captures the current implemented/partial/missing status and should be regenerated on future major or minor version bumps
 

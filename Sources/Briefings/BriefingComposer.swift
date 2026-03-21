@@ -10,15 +10,19 @@ public struct BriefingComposer: Sendable {
         openingLine: GeneratedNarrative,
         newsSummary: GeneratedNarrative
     ) -> BriefingArtifact {
+        let preferredMode = request.preferredMode
+        let actualMode = resolvedActualMode(
+            preferredMode: preferredMode,
+            openingLine: openingLine,
+            newsSummary: newsSummary
+        )
+        let fallbackReason = openingLine.fallbackReason ?? newsSummary.fallbackReason
         let sections = buildSections(request: request, newsSummary: newsSummary)
         let subject = "Daily Briefing for \(request.audience.displayName) — \(ReadyRoomFormatters.monthDayWeekday.string(from: request.date))"
-
-        let preferredMode = request.preferredMode
-        let actualMode = [openingLine.actualMode, newsSummary.actualMode].contains { $0 != preferredMode } ? openingLine.actualMode : preferredMode
         let trace = DecisionTrace(
             preferredGenerationMode: preferredMode,
             actualGenerationMode: actualMode,
-            fallbackReason: openingLine.fallbackReason ?? newsSummary.fallbackReason
+            fallbackReason: fallbackReason
         )
 
         return BriefingArtifact(
@@ -28,8 +32,10 @@ public struct BriefingComposer: Sendable {
             bodyHTML: renderHTML(
                 request: request,
                 openingLine: openingLine.text,
-                newsSummary: newsSummary.text,
-                sections: sections
+                sections: sections,
+                preferredMode: preferredMode,
+                actualMode: actualMode,
+                fallbackReason: fallbackReason
             ),
             sections: sections,
             preferredMode: preferredMode,
@@ -63,17 +69,43 @@ public struct BriefingComposer: Sendable {
 
         let today = items(on: dayBuckets.today, from: relevant, calendar: calendar)
         if !today.isEmpty {
-            sections.append(makeSection(title: "Today", items: today, palette: request.personColorPalette, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+            sections.append(
+                makeDatedSection(
+                    id: "today",
+                    label: "Today",
+                    date: dayBuckets.today,
+                    items: today,
+                    palette: request.personColorPalette,
+                    calendarPlaceholderLabel: request.calendarPlaceholderLabel
+                )
+            )
         }
 
         let tomorrow = items(on: dayBuckets.tomorrow, from: relevant, calendar: calendar)
         if !tomorrow.isEmpty {
-            sections.append(makeSection(title: "Tomorrow", items: tomorrow, palette: request.personColorPalette, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+            sections.append(
+                makeDatedSection(
+                    id: "tomorrow",
+                    label: "Tomorrow",
+                    date: dayBuckets.tomorrow,
+                    items: tomorrow,
+                    palette: request.personColorPalette,
+                    calendarPlaceholderLabel: request.calendarPlaceholderLabel
+                )
+            )
         }
 
         let upcoming = items(onAnyOf: dayBuckets.upcoming, from: relevant, calendar: calendar)
         if !upcoming.isEmpty {
-            sections.append(makeSection(title: "Upcoming", items: upcoming, palette: request.personColorPalette, calendarPlaceholderLabel: request.calendarPlaceholderLabel))
+            sections.append(
+                makeUpcomingSection(
+                    days: dayBuckets.upcoming,
+                    items: upcoming,
+                    palette: request.personColorPalette,
+                    calendarPlaceholderLabel: request.calendarPlaceholderLabel,
+                    calendar: calendar
+                )
+            )
         }
 
         if !request.dueSoon.isEmpty {
@@ -129,6 +161,15 @@ public struct BriefingComposer: Sendable {
         }
     }
 
+    private func resolvedActualMode(
+        preferredMode: NarrativeGenerationMode,
+        openingLine: GeneratedNarrative,
+        newsSummary: GeneratedNarrative
+    ) -> NarrativeGenerationMode {
+        [openingLine.actualMode, newsSummary.actualMode]
+            .first(where: { $0 != preferredMode }) ?? preferredMode
+    }
+
     private func items(onAnyOf days: [Date], from items: [NormalizedItem], calendar: Calendar) -> [NormalizedItem] {
         let includedDays = Set(days)
         return items.filter { item in
@@ -139,43 +180,131 @@ public struct BriefingComposer: Sendable {
         }
     }
 
+    private func makeDatedSection(
+        id: String,
+        label: String,
+        date: Date,
+        items: [NormalizedItem],
+        palette: PersonColorPaletteSettings,
+        calendarPlaceholderLabel: String? = nil
+    ) -> BriefingSection {
+        BriefingSection(
+            id: id,
+            title: "\(label) - \(ReadyRoomFormatters.briefingSectionDate.string(from: date))",
+            body: formattedItemLines(
+                for: items,
+                palette: palette,
+                prefixStyle: .timeOnly,
+                calendarPlaceholderLabel: calendarPlaceholderLabel
+            ),
+            items: items
+        )
+    }
+
     private func makeSection(
         title: String,
         items: [NormalizedItem],
         palette: PersonColorPaletteSettings,
         calendarPlaceholderLabel: String? = nil
     ) -> BriefingSection {
-        let body = items.map { item -> String in
-            let location = item.location.map { " (\($0))" } ?? ""
-            let placeholderPrefix = item.sourceType == .calendar && calendarPlaceholderLabel != nil ? "[Placeholder] " : ""
-            let content = [formattedItemPrefix(for: item), placeholderPrefix + item.title + location]
-                .filter { !$0.isEmpty }
-                .joined(separator: " — ")
-            return briefingAccentMarkup(for: item, palette: palette) + escapeHTML(content)
-        }
-        .joined(separator: "<br/>")
-
         return BriefingSection(
             id: title.lowercased().replacingOccurrences(of: " ", with: "-"),
             title: title,
-            body: body,
+            body: formattedItemLines(
+                for: items,
+                palette: palette,
+                prefixStyle: .fullDate,
+                calendarPlaceholderLabel: calendarPlaceholderLabel
+            ),
             items: items
         )
     }
 
-    private func formattedItemPrefix(for item: NormalizedItem) -> String {
+    private func makeUpcomingSection(
+        days: [Date],
+        items sectionItems: [NormalizedItem],
+        palette: PersonColorPaletteSettings,
+        calendarPlaceholderLabel: String? = nil,
+        calendar: Calendar
+    ) -> BriefingSection {
+        let groups = days.compactMap { day -> String? in
+            let dayItems = items(on: day, from: sectionItems, calendar: calendar)
+            guard !dayItems.isEmpty else {
+                return nil
+            }
+
+            let header = """
+            <div style="font-size: 12px; font-weight: 700; color: #52606d; margin: 0 0 6px 0;">\(escapeHTML(ReadyRoomFormatters.briefingSectionDate.string(from: day)))</div>
+            """
+            let lines = formattedItemLines(
+                for: dayItems,
+                palette: palette,
+                prefixStyle: .timeOnly,
+                calendarPlaceholderLabel: calendarPlaceholderLabel
+            )
+            return header + "<div>\(lines)</div>"
+        }
+
+        return BriefingSection(
+            id: "upcoming",
+            title: "Upcoming",
+            body: groups.joined(separator: "<br/><br/>"),
+            items: sectionItems
+        )
+    }
+
+    private func formattedItemLines(
+        for items: [NormalizedItem],
+        palette: PersonColorPaletteSettings,
+        prefixStyle: BriefingItemPrefixStyle,
+        calendarPlaceholderLabel: String? = nil
+    ) -> String {
+        items
+            .map { formattedItemLine(for: $0, palette: palette, prefixStyle: prefixStyle, calendarPlaceholderLabel: calendarPlaceholderLabel) }
+            .joined(separator: "<br/>")
+    }
+
+    private func formattedItemLine(
+        for item: NormalizedItem,
+        palette: PersonColorPaletteSettings,
+        prefixStyle: BriefingItemPrefixStyle,
+        calendarPlaceholderLabel: String? = nil
+    ) -> String {
+        let location = item.location.map { " (\($0))" } ?? ""
+        let placeholderPrefix = item.sourceType == .calendar && calendarPlaceholderLabel != nil ? "[Placeholder] " : ""
+        let content = [formattedItemPrefix(for: item, style: prefixStyle), placeholderPrefix + item.title + location]
+            .filter { !$0.isEmpty }
+            .joined(separator: " — ")
+        return escapeHTML(content) + " " + briefingAccentMarkup(for: item, palette: palette)
+    }
+
+    private func formattedItemPrefix(for item: NormalizedItem, style: BriefingItemPrefixStyle) -> String {
         guard let start = item.startDate else {
             return item.isAllDay ? "All day" : ""
         }
 
-        if item.isAllDay {
-            return "\(ReadyRoomFormatters.abbreviatedWeekdayMonthDay.string(from: start)) — All day"
+        switch style {
+        case .fullDate:
+            if item.isAllDay {
+                return "\(ReadyRoomFormatters.abbreviatedWeekdayMonthDay.string(from: start)) — All day"
+            }
+            return "\(ReadyRoomFormatters.abbreviatedWeekdayMonthDay.string(from: start)) at \(ReadyRoomFormatters.shortClock.string(from: start))"
+        case .timeOnly:
+            if item.isAllDay {
+                return "All day"
+            }
+            return ReadyRoomFormatters.shortClock.string(from: start)
         }
-
-        return "\(ReadyRoomFormatters.abbreviatedWeekdayMonthDay.string(from: start)) at \(ReadyRoomFormatters.shortClock.string(from: start))"
     }
 
-    private func renderHTML(request: BriefingRequest, openingLine: String, newsSummary: String, sections: [BriefingSection]) -> String {
+    private func renderHTML(
+        request: BriefingRequest,
+        openingLine: String,
+        sections: [BriefingSection],
+        preferredMode: NarrativeGenerationMode,
+        actualMode: NarrativeGenerationMode,
+        fallbackReason: String?
+    ) -> String {
         let weather = request.weather.map {
             let weatherLine = "\($0.summary), \(Int($0.currentTemperatureF))F now, high \(Int($0.highF))/low \(Int($0.lowF))"
             return request.weatherPlaceholderLabel.map { "\(placeholderNotice(label: $0))<br/>\(weatherLine)" } ?? weatherLine
@@ -190,11 +319,17 @@ public struct BriefingComposer: Sendable {
             """
         }.joined(separator: "\n")
 
-        let fallbackDisclosure = request.preferredMode == .templated ? "" : """
-        <p style="font-size: 12px; color: #6b7280; margin-top: 24px;">
-            Preferred mode: \(request.preferredMode.rawValue). Actual mode used: \(sections.contains(where: { $0.title == "In The World" }) ? newsSummary.isEmpty ? request.preferredMode.rawValue : request.preferredMode.rawValue : request.preferredMode.rawValue).
-        </p>
-        """
+        let fallbackDisclosure: String
+        if preferredMode != actualMode {
+            let reason = escapeHTML(fallbackReason ?? "Ready Room used deterministic templating for this briefing.")
+            fallbackDisclosure = """
+            <p style="font-size: 12px; color: #6b7280; margin-top: 24px;">
+                Preferred mode: \(preferredMode.rawValue). Actual mode used: \(actualMode.rawValue). Reason: \(reason)
+            </p>
+            """
+        } else {
+            fallbackDisclosure = ""
+        }
 
         return """
         <html>
@@ -223,8 +358,8 @@ public struct BriefingComposer: Sendable {
             """
             <span style="display: inline-block; margin: 0 4px 4px 0; padding: 1px 7px; border-radius: 999px; border: 1px solid \(token.hex)44; background: \(token.hex)22; color: #253041; font-size: 11px; font-weight: 600;">\(escapeHTML(token.shortLabel))</span>
             """
-        }.joined()
-        return "<span style=\"display: inline-block; margin-right: 4px; white-space: nowrap;\">\(pills)</span>"
+        }.joined(separator: "<span style=\"font-size: 11px; color: #52606d; margin-right: 4px;\">/</span>")
+        return "<span style=\"display: inline-block; margin-left: 6px; white-space: nowrap;\"><span style=\"font-size: 11px; color: #52606d; margin-right: 4px;\">[</span>\(pills)<span style=\"font-size: 11px; color: #52606d;\">]</span></span>"
     }
 
     private func sourceSummary(request: BriefingRequest) -> [String] {
@@ -259,4 +394,9 @@ public struct BriefingComposer: Sendable {
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
     }
+}
+
+private enum BriefingItemPrefixStyle {
+    case fullDate
+    case timeOnly
 }

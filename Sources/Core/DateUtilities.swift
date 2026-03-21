@@ -25,6 +25,12 @@ public enum ReadyRoomFormatters {
         formatter.dateFormat = "EEEE, MMM d"
         return formatter
     }()
+
+    public static let briefingSectionDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE MMMM d"
+        return formatter
+    }()
 }
 
 public extension Calendar {

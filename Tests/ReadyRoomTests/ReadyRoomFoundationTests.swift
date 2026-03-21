@@ -125,12 +125,34 @@ struct ReadyRoomFoundationTests {
             dueSoon: [],
             preferredMode: .foundationModels
         )
-        let opening = GeneratedNarrative(text: "Busy but manageable.", preferredMode: .foundationModels, actualMode: .templated, fallbackReason: "Fallback.")
-        let news = GeneratedNarrative(text: "Headline", preferredMode: .foundationModels, actualMode: .templated, fallbackReason: "Fallback.")
+        let fallbackReason = "Ready Room used deterministic templating because Foundation Models generation is not live yet."
+        let opening = GeneratedNarrative(text: "Busy but manageable.", preferredMode: .foundationModels, actualMode: .templated, fallbackReason: fallbackReason)
+        let news = GeneratedNarrative(text: "Headline", preferredMode: .foundationModels, actualMode: .templated, fallbackReason: fallbackReason)
         let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
 
-        #expect(artifact.bodyHTML.contains("Preferred mode"))
         #expect(artifact.actualMode == .templated)
+        #expect(artifact.bodyHTML.contains("Preferred mode: foundationModels."))
+        #expect(artifact.bodyHTML.contains("Actual mode used: templated."))
+        #expect(artifact.bodyHTML.contains("Foundation Models generation is not live yet"))
+    }
+
+    @Test
+    func foundationModelsGeneratorReportsDeterministicFallbackReason() async throws {
+        let generator = FoundationModelsNarrativeGenerator()
+        let request = BriefingRequest(
+            audience: .john,
+            normalizedItems: [],
+            weather: nil,
+            headlines: [],
+            mediaItems: [],
+            dueSoon: [],
+            preferredMode: .foundationModels
+        )
+
+        let opening = try await generator.generateOpeningLine(for: request)
+
+        #expect(opening.actualMode == .templated)
+        #expect(opening.fallbackReason == "Ready Room used deterministic templating because Foundation Models generation is not live yet.")
     }
 
     @Test
@@ -172,7 +194,7 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
-    func briefingComposerIncludesDatesInEventLines() {
+    func briefingComposerUsesDatedSectionHeadersInsteadOfPerEventDates() {
         let calendar = Calendar.readyRoomGregorian
         let item = NormalizedItem(
             id: "calendar:dated",
@@ -198,7 +220,10 @@ struct ReadyRoomFoundationTests {
 
         let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
 
-        #expect(artifact.bodyHTML.contains("Sun, Mar 15 at 9:25"))
+        #expect(artifact.sections.map(\.title) == ["Tomorrow - Sunday March 15"])
+        #expect(artifact.bodyHTML.contains("Tomorrow - Sunday March 15"))
+        #expect(artifact.bodyHTML.contains("9:25"))
+        #expect(artifact.bodyHTML.contains("Sun, Mar 15 at 9:25") == false)
     }
 
     @Test
@@ -230,12 +255,19 @@ struct ReadyRoomFoundationTests {
 
         let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
         let plainText = EmailBodyProjection.plainTextAlternative(for: artifact)
+        let titleIndex = artifact.bodyHTML.range(of: "School pickup")?.lowerBound
+        let audienceIndex = artifact.bodyHTML.range(of: ">J<")?.lowerBound
 
         #expect(artifact.bodyHTML.contains(">J<"))
         #expect(artifact.bodyHTML.contains(">A<"))
         #expect(artifact.bodyHTML.contains("#3478F6"))
         #expect(artifact.bodyHTML.contains("#39A96B"))
-        #expect(plainText.contains("School pickup"))
+        #expect(titleIndex != nil)
+        #expect(audienceIndex != nil)
+        if let titleIndex, let audienceIndex {
+            #expect(titleIndex < audienceIndex)
+        }
+        #expect(plainText.contains("School pickup [J/A]"))
     }
 
     @Test
@@ -305,13 +337,15 @@ struct ReadyRoomFoundationTests {
 
         let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
 
-        #expect(artifact.sections.map(\.title) == ["Today", "Tomorrow", "Upcoming"])
+        #expect(artifact.sections.map(\.title) == ["Today - Saturday March 14", "Tomorrow - Sunday March 15", "Upcoming"])
         #expect(artifact.sections.contains(where: { $0.title == "This Morning" }) == false)
         #expect(artifact.sections.contains(where: { $0.title == "Tonight" }) == false)
         #expect(artifact.sections.contains(where: { $0.title == "Coming Up" }) == false)
-        #expect(artifact.sections.first(where: { $0.title == "Today" })?.items.map(\.id) == ["calendar:today"])
-        #expect(artifact.sections.first(where: { $0.title == "Tomorrow" })?.items.map(\.id) == ["calendar:tomorrow"])
+        #expect(artifact.sections.first(where: { $0.title == "Today - Saturday March 14" })?.items.map(\.id) == ["calendar:today"])
+        #expect(artifact.sections.first(where: { $0.title == "Tomorrow - Sunday March 15" })?.items.map(\.id) == ["calendar:tomorrow"])
         #expect(artifact.sections.first(where: { $0.title == "Upcoming" })?.items.map(\.id) == ["calendar:upcoming-1", "calendar:upcoming-2"])
+        #expect(artifact.bodyHTML.contains("Monday March 16"))
+        #expect(artifact.bodyHTML.contains("Wednesday March 18"))
         #expect(artifact.bodyHTML.contains("Too far out") == false)
     }
 
