@@ -458,6 +458,17 @@ public struct ReadyRoomRulesEngine: Sendable {
             )
         }
 
+        if workStatusRelevantToBothAdults(event) {
+            return AudienceDecision(
+                audiences: Set(BriefingAudience.allCases),
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.relevance.presence-status",
+                    summary: "Relevant adults resolved from work status",
+                    detail: "Explicit home, office, or PTO work status makes this relevant to both Amy and John."
+                )
+            )
+        }
+
         if familyRelevant(event) && role != .work {
             return AudienceDecision(
                 audiences: Set(BriefingAudience.allCases),
@@ -580,6 +591,27 @@ public struct ReadyRoomRulesEngine: Sendable {
             "parent-teacher"
         ]
         return keywords.contains(where: text.contains)
+    }
+
+    private func workStatusRelevantToBothAdults(_ event: RawCalendarEvent) -> Bool {
+        let text = [event.title, event.notes].compactMap { $0 }.joined(separator: " ").lowercased()
+        let phrases = [
+            "work from home",
+            "wfh",
+            "at home",
+            "home today",
+            "home office",
+            "in office",
+            "in the office",
+            "office today",
+            "back in office",
+            "onsite",
+            "pto",
+            "paid time off",
+            "vacation",
+            "out of office"
+        ]
+        return phrases.contains(where: text.contains)
     }
 
     private func detectedPeople(in text: String) -> Set<PersonID> {

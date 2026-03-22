@@ -51,6 +51,96 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func workFromHomeStatusMakesSingleAdultEventRelevantToBothBriefings() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "john-wfh",
+            calendarIdentifier: "john-work",
+            calendarTitle: "John Work",
+            title: "John - Work from Home",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600),
+            sourceOwnerHint: .john
+        )
+
+        let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .john)
+        #expect(items[0].relevantAudiences == Set([.john, .amy]))
+        #expect(items[0].trace.appliedRules.contains(where: { $0.ruleID == "calendar.relevance.presence-status" }))
+    }
+
+    @Test
+    func officeStatusMakesSingleAdultEventRelevantToBothBriefings() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "amy-office",
+            calendarIdentifier: "amy-work",
+            calendarTitle: "Amy Work",
+            title: "Amy in the office",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600),
+            sourceOwnerHint: .amy
+        )
+
+        let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .amy)
+        #expect(items[0].relevantAudiences == Set([.john, .amy]))
+        #expect(items[0].inclusion.johnBriefing)
+        #expect(items[0].inclusion.amyBriefing)
+    }
+
+    @Test
+    func paidTimeOffStatusMakesSingleAdultEventRelevantToBothBriefings() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "john-pto",
+            calendarIdentifier: "john-work",
+            calendarTitle: "John Work",
+            title: "John PTO",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600),
+            sourceOwnerHint: .john
+        )
+
+        let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .john)
+        #expect(items[0].relevantAudiences == Set([.john, .amy]))
+        #expect(items[0].trace.appliedRules.contains(where: { $0.ruleID == "calendar.relevance.presence-status" }))
+    }
+
+    @Test
+    func vacationStatusMakesSingleAdultEventRelevantToBothBriefings() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "amy-vacation",
+            calendarIdentifier: "amy-work",
+            calendarTitle: "Amy Work",
+            title: "Amy vacation",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600),
+            sourceOwnerHint: .amy
+        )
+
+        let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .amy)
+        #expect(items[0].relevantAudiences == Set([.john, .amy]))
+        #expect(items[0].inclusion.johnBriefing)
+        #expect(items[0].inclusion.amyBriefing)
+    }
+
+    @Test
     func bothAdultsEventResolvesFamilyOwnerAndBothBriefings() {
         let engine = ReadyRoomRulesEngine()
         let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
