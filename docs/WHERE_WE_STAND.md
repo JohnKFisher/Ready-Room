@@ -1,6 +1,6 @@
 # Ready Room: Where We Stand
 
-Updated for version `0.2.10 (30)`
+Updated for version `0.2.11 (31)`
 
 ## Overall Status
 
@@ -29,6 +29,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - completed items from the current day are dimmed and marked complete
 - multi-day all-day events show on each day they span
 - obligations appear in the timeline as all-day items
+- due-soon obligations no longer duplicate an obviously matching all-day calendar item when owner, day, and normalized title line up
 - due-soon card shows remaining days
 - timeline items now show owner-based accent rails and pills for John, Amy, Ellie, Mia, and Family
 - placeholder data is clearly labeled in the dashboard and debug views when a source is still sample-backed
@@ -183,6 +184,6 @@ To get useful daily behavior right now:
 
 ## Latest Durable Rollback Point
 
-- `known-good/20260321-ready-room-0.2.10`
+- `known-good/20260321-ready-room-0.2.11`
 
 This is the current durable “last known good” anchor to return to if a later change breaks something important.
