@@ -19,7 +19,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 ### Core Engine
 - normalized event and obligation model
-- rules-based relevance, ownership, work/home classification, due-soon handling, change tracking, and conflict detection
+- rules-based required ownership, adult-only briefing relevance, work/home classification, due-soon handling, change tracking, and conflict detection
 - machine-local persisted calendar baseline keeps `New or Changed` stable across restarts
 - decision-trace structures for inspectability
 
@@ -30,7 +30,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - multi-day all-day events show on each day they span
 - obligations appear in the timeline as all-day items
 - due-soon card shows remaining days
-- timeline items now show subtle person-based accent rails and pills for John, Amy, Ellie, and Mia
+- timeline items now show owner-based accent rails and pills for John, Amy, Ellie, Mia, and Family
 - placeholder data is clearly labeled in the dashboard and debug views when a source is still sample-backed
 - dashboard news now shows ranked live headlines from configured RSS/Atom feeds, with clickable article links that open in the default browser
 
@@ -48,7 +48,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - compare-modes preview works
 - placeholder items are clearly labeled in the briefing
 - dated `Today`/`Tomorrow` headers and grouped `Upcoming` day headers now keep briefings readable without repeating the date on every line
-- briefing item rows now include subtle person chips using the shared audience-color palette
+- briefing item rows now include owner-only chips using the shared people-color palette
 - meeting-link locations now render as friendly labels such as `Zoom Meeting` and `Teams Meeting`
 - briefings include a strong early-development warning banner
 
@@ -87,7 +87,8 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 
 ### Settings / Preferences
 - the sidebar structure exists
-- sender, storage/sync, weather, and news are meaningfully usable
+- sender, storage/sync, weather, news, and calendars are meaningfully usable
+- calendar settings now expose per-calendar role, default owner, dashboard inclusion, default John/Amy relevance, and read-only preview rows for recent normalized events
 - dashboard settings now include shared person-color customization with a live preview and reset-to-defaults control
 - sender settings now include SMTP server details, sender selection, and local Keychain-backed password status
 - most other settings pages are still placeholders or explanatory shells
@@ -111,10 +112,10 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - permission-guidance flow
 
 ### Calendar Management UI
-- calendar role confirmation UI
-- per-calendar owner and include/exclude controls
 - inactive-until-classified workflow
-- per-calendar color and override management
+- per-calendar color management
+- keyword-owner override editing
+- item-level correction and “make this a rule” workflows
 
 ### Notifications
 - macOS notifications for major near-term changes
@@ -147,7 +148,8 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - SMTP delivery currently assumes username/app-password style auth; OAuth-specific provider flows are not implemented.
 - Apple Mail still sends the readable plain-text compatibility version, not a fully rendered HTML email, when fallback is used.
 - Scheduled sending is improved, but still not fully proven as “trust it every morning without checking.”
-- Much of Settings is still scaffold/UI shell rather than finished product.
+- Calendar defaults are now configurable, but correction is still per-calendar only; item-level fixes and keyword rules are not built yet.
+- Several settings pages are still scaffold/UI shell rather than finished product.
 - Notifications are not implemented, so the app will not proactively warn you about important changes yet.
 - This is still an early build and should be treated as helpful-but-experimental.
 
@@ -168,9 +170,8 @@ To get useful daily behavior right now:
 - SMTP setup is partly shared and partly local: host/user/from settings sync, but each Mac needs its own local Keychain password.
 - Cross-Mac coordination is practical, not fully hardened.
 - Placeholder data can still leak into daily use for media because that connector is not fully configured yet.
-- Placeholder data can still leak into daily use for media because that connector is not fully configured yet.
-- Some configuration areas exist in the data model but not yet in a real user-facing workflow.
-- Person-based audience colors are configurable now, but the broader calendar management and override UI is still incomplete.
+- Per-calendar defaults improve classification, but misclassified single events still need a future item-level correction flow.
+- People colors are configurable now, but per-calendar color overrides and richer calendar-rule management are still incomplete.
 
 ## Recommended Next Priorities
 
@@ -178,7 +179,7 @@ To get useful daily behavior right now:
 2. Improve sender reliability and diagnostics so morning-send failures are obvious and recoverable.
 3. Build the real setup wizard and permissions guidance.
 4. Add notifications and archive/history UI.
-5. Finish the most important settings pages, especially calendars and the remaining briefing controls.
+5. Add item-level correction workflows and finish the remaining briefing/calendar management controls.
 
 ## Latest Durable Rollback Point
 

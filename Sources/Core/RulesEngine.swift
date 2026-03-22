@@ -3,6 +3,16 @@ import Foundation
 public struct ReadyRoomRulesEngine: Sendable {
     public var configuration: ReadyRoomRulesConfiguration
 
+    private struct OwnerDecision {
+        let owner: PersonID
+        let traceEntry: DecisionTraceEntry
+    }
+
+    private struct AudienceDecision {
+        let audiences: Set<BriefingAudience>
+        let traceEntry: DecisionTraceEntry
+    }
+
     public init(configuration: ReadyRoomRulesConfiguration = ReadyRoomRulesConfiguration()) {
         self.configuration = configuration
     }
@@ -29,7 +39,13 @@ public struct ReadyRoomRulesEngine: Sendable {
         previousItems: [String: NormalizedItem] = [:]
     ) -> [NormalizedItem] {
         events.map { event in
-            normalizeCalendarEvent(event, source: source, configuration: configurations[event.calendarIdentifier], health: health, previousItems: previousItems)
+            normalizeCalendarEvent(
+                event,
+                source: source,
+                configuration: configurations[event.calendarIdentifier],
+                health: health,
+                previousItems: previousItems
+            )
         }
         .sorted {
             ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture)
@@ -60,10 +76,20 @@ public struct ReadyRoomRulesEngine: Sendable {
             let previouslyVisible = previousVisibleIDs.contains(obligation.id)
             let changeState: ChangeState = visibleNow && !previouslyVisible ? .enteredReminderWindow : .unchanged
             let owner = obligation.owner ?? .family
-            let relevant: Set<PersonID> = owner == .family ? [.john, .amy, .family] : [owner]
+            let relevantAudiences = owner.defaultRelevantAudiences
             let trace = DecisionTrace(
                 sourceFacts: ["Obligation schedule kind: \(obligation.schedule.kind.rawValue)"],
                 appliedRules: [
+                    DecisionTraceEntry(
+                        ruleID: "obligation.owner",
+                        summary: "Owner resolved",
+                        detail: "Obligation owner resolved as \(owner.displayName)"
+                    ),
+                    DecisionTraceEntry(
+                        ruleID: "obligation.relevance",
+                        summary: "Briefing relevance resolved",
+                        detail: "Relevant to \(audienceSummary(relevantAudiences))."
+                    ),
                     DecisionTraceEntry(
                         ruleID: "obligation.reminder-window",
                         summary: "Obligation falls within visible reminder window",
@@ -82,15 +108,15 @@ public struct ReadyRoomRulesEngine: Sendable {
                 startDate: nextOccurrence,
                 endDate: nextOccurrence,
                 isAllDay: true,
-                owner: owner == .family ? nil : owner,
-                relevantPeople: relevant,
+                owner: owner,
+                relevantAudiences: relevantAudiences,
                 calendarRole: .sharedFamily,
                 lifeArea: .home,
                 confidence: 0.98,
                 inclusion: InclusionFlags(
                     dashboard: true,
-                    johnBriefing: relevant.contains(.john),
-                    amyBriefing: relevant.contains(.amy)
+                    johnBriefing: relevantAudiences.contains(.john),
+                    amyBriefing: relevantAudiences.contains(.amy)
                 ),
                 changeState: changeState,
                 sourceHealth: health,
@@ -209,20 +235,34 @@ public struct ReadyRoomRulesEngine: Sendable {
     ) -> NormalizedItem {
         let role = configuration?.role ?? inferCalendarRole(for: event.calendarTitle)
         let markers = detectedPeople(in: [event.title, event.notes].compactMap { $0 }.joined(separator: " "))
-        let owner = resolveOwner(event: event, configuration: configuration, markers: markers, role: role)
-        let relevance = resolveRelevantPeople(event: event, markers: markers, owner: owner, role: role)
+        let ownerDecision = resolveOwner(event: event, configuration: configuration, markers: markers, role: role)
+        let audienceDecision = resolveRelevantAudiences(
+            event: event,
+            configuration: configuration,
+            markers: markers,
+            owner: ownerDecision.owner,
+            role: role
+        )
         let inclusion = InclusionFlags(
             dashboard: configuration?.includeOnDashboard ?? (role != .inactiveUnclassified),
-            johnBriefing: (configuration?.includeInJohnBriefing ?? true) && relevance.contains(.john),
-            amyBriefing: (configuration?.includeInAmyBriefing ?? true) && relevance.contains(.amy)
+            johnBriefing: audienceDecision.audiences.contains(.john),
+            amyBriefing: audienceDecision.audiences.contains(.amy)
         )
 
+        let markerSummary = markers.isEmpty ? "none" : markers.map(\.displayName).sorted().joined(separator: ", ")
         let trace = DecisionTrace(
             sourceFacts: [
                 "Calendar: \(event.calendarTitle)",
-                "Markers: \(markers.map(\.rawValue).sorted().joined(separator: ", "))"
+                "Detected people: \(markerSummary)",
+                "Calendar defaults: \(configuration.map(defaultSummary(for:)) ?? "inferred")"
             ],
-            appliedRules: traceEntries(for: event, role: role, owner: owner, markers: markers, relevance: relevance)
+            appliedRules: traceEntries(
+                for: event,
+                role: role,
+                markers: markers,
+                ownerDecision: ownerDecision,
+                audienceDecision: audienceDecision
+            )
         )
 
         let previous = previousItems["calendar:\(event.id)"]
@@ -240,8 +280,8 @@ public struct ReadyRoomRulesEngine: Sendable {
             endDate: event.endDate,
             isAllDay: event.isAllDay,
             location: event.location,
-            owner: owner,
-            relevantPeople: relevance,
+            owner: ownerDecision.owner,
+            relevantAudiences: audienceDecision.audiences,
             calendarRole: role,
             lifeArea: resolveLifeArea(for: role),
             confidence: confidence,
@@ -274,47 +314,205 @@ public struct ReadyRoomRulesEngine: Sendable {
         configuration: CalendarConfiguration?,
         markers: Set<PersonID>,
         role: CalendarRole
-    ) -> PersonID? {
+    ) -> OwnerDecision {
+        let kids = kidMarkers(in: markers)
+        let adults = adultMarkers(in: markers)
+
+        if kids.count > 1 {
+            return OwnerDecision(
+                owner: .family,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.owner.multi-kid",
+                    summary: "Owner resolved from multiple kid markers",
+                    detail: "Multiple kid names appear in the event text, so owner resolves to Family."
+                )
+            )
+        }
+
+        if let kid = kids.first {
+            return OwnerDecision(
+                owner: kid,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.owner.kid",
+                    summary: "Owner resolved from kid marker",
+                    detail: "\(kid.displayName) appears in the event text, so owner resolves to \(kid.displayName)."
+                )
+            )
+        }
+
+        if adults.count == 2 {
+            return OwnerDecision(
+                owner: .family,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.owner.shared-adult",
+                    summary: "Owner resolved as shared adult item",
+                    detail: "Both Amy and John appear in the event text, so owner resolves to Family."
+                )
+            )
+        }
+
+        if let adult = adults.first {
+            return OwnerDecision(
+                owner: adult.person,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.owner.adult",
+                    summary: "Owner resolved from adult marker",
+                    detail: "\(adult.displayName) appears in the event text, so owner resolves to \(adult.displayName)."
+                )
+            )
+        }
+
+        if let override = matchedKeywordOwnerOverride(for: event, configuration: configuration) {
+            return OwnerDecision(
+                owner: override.owner,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.owner.keyword-override",
+                    summary: "Owner resolved from keyword rule",
+                    detail: "Matched keyword '\(override.keyword)' and resolved owner to \(override.owner.displayName)."
+                )
+            )
+        }
+
+        if familyRelevant(event) && role != .work {
+            return OwnerDecision(
+                owner: .family,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.owner.family-ops",
+                    summary: "Owner resolved as family logistics",
+                    detail: "The event looks like shared family logistics, so owner resolves to Family."
+                )
+            )
+        }
+
         if let explicit = configuration?.owner {
-            return explicit
+            return OwnerDecision(
+                owner: explicit,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.owner.calendar-default",
+                    summary: "Owner resolved from calendar default",
+                    detail: "No stronger event clue was found, so owner uses the calendar default \(explicit.displayName)."
+                )
+            )
         }
-        if let override = configuration?.keywordOwnerOverrides.first(where: { key, _ in event.title.localizedCaseInsensitiveContains(key) || (event.notes?.localizedCaseInsensitiveContains(key) ?? false) })?.value {
-            return override
+
+        if let sourceOwnerHint = event.sourceOwnerHint {
+            return OwnerDecision(
+                owner: sourceOwnerHint,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.owner.source-hint",
+                    summary: "Owner resolved from source hint",
+                    detail: "No stronger event clue was found, so owner uses the source hint \(sourceOwnerHint.displayName)."
+                )
+            )
         }
-        if markers.contains(.john) { return .john }
-        if markers.contains(.amy) { return .amy }
-        if role == .work { return event.sourceOwnerHint }
-        return event.sourceOwnerHint
+
+        return OwnerDecision(
+            owner: .family,
+            traceEntry: DecisionTraceEntry(
+                ruleID: "calendar.owner.family-fallback",
+                summary: "Owner fell back to Family",
+                detail: "No stronger owner clue was found, so owner falls back to Family."
+            )
+        )
     }
 
-    private func resolveRelevantPeople(
+    private func resolveRelevantAudiences(
         event: RawCalendarEvent,
+        configuration: CalendarConfiguration?,
         markers: Set<PersonID>,
-        owner: PersonID?,
+        owner: PersonID,
         role: CalendarRole
-    ) -> Set<PersonID> {
-        if markers.contains(.ellie) || markers.contains(.mia) {
-            return Set([PersonID.john, .amy, .ellie, .mia]).intersection(markers.union(Set([.john, .amy])))
+    ) -> AudienceDecision {
+        let explicitAdults = adultAudienceSet(from: markers)
+
+        if owner == .family {
+            return AudienceDecision(
+                audiences: Set(BriefingAudience.allCases),
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.relevance.owner-family",
+                    summary: "Relevant adults resolved from shared owner",
+                    detail: "Family-owned events are relevant to both Amy and John."
+                )
+            )
         }
 
+        if owner == .ellie || owner == .mia {
+            return AudienceDecision(
+                audiences: Set(BriefingAudience.allCases),
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.relevance.owner-kid",
+                    summary: "Relevant adults resolved from kid owner",
+                    detail: "\(owner.displayName)-owned events are relevant to both Amy and John."
+                )
+            )
+        }
+
+        if explicitAdults.count == 2 {
+            return AudienceDecision(
+                audiences: explicitAdults,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.relevance.both-adults",
+                    summary: "Relevant adults resolved from shared-adult clues",
+                    detail: "Both Amy and John appear in the event text, so the item is relevant to both briefings."
+                )
+            )
+        }
+
+        if familyRelevant(event) && role != .work {
+            return AudienceDecision(
+                audiences: Set(BriefingAudience.allCases),
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.relevance.family-ops",
+                    summary: "Relevant adults resolved from family logistics",
+                    detail: "This event looks like family logistics, so it is relevant to both Amy and John."
+                )
+            )
+        }
+
+        if explicitAdults.count == 1 {
+            return AudienceDecision(
+                audiences: explicitAdults,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.relevance.explicit-adult",
+                    summary: "Relevant adults resolved from explicit adult clue",
+                    detail: "A single adult is named in the event text, so briefing relevance stays with that adult."
+                )
+            )
+        }
+
+        if let configuration {
+            return AudienceDecision(
+                audiences: configuration.defaultRelevantAudiences,
+                traceEntry: DecisionTraceEntry(
+                    ruleID: "calendar.relevance.calendar-default",
+                    summary: "Relevant adults resolved from calendar defaults",
+                    detail: "No stronger event clue was found, so briefing relevance uses the calendar defaults \(audienceSummary(configuration.defaultRelevantAudiences))."
+                )
+            )
+        }
+
+        let fallbackAudiences = heuristicRelevantAudiences(for: owner, role: role)
+        return AudienceDecision(
+            audiences: fallbackAudiences,
+            traceEntry: DecisionTraceEntry(
+                ruleID: "calendar.relevance.heuristic",
+                summary: "Relevant adults resolved from inferred defaults",
+                detail: "No stronger event clue was found, so briefing relevance falls back to \(audienceSummary(fallbackAudiences))."
+            )
+        )
+    }
+
+    private func heuristicRelevantAudiences(for owner: PersonID, role: CalendarRole) -> Set<BriefingAudience> {
         switch role {
         case .work:
-            if let owner {
-                return [owner]
+            guard let audience = owner.briefingAudience else {
+                return []
             }
-            return markers.intersection([.john, .amy])
+            return [audience]
         case .sharedFamily, .kidRelated:
-            if markers.contains(.john) && !markers.contains(.amy) {
-                return familyRelevant(event) ? [.john, .amy] : [.john]
-            }
-            if markers.contains(.amy) && !markers.contains(.john) {
-                return familyRelevant(event) ? [.john, .amy] : [.amy]
-            }
-            return Set([PersonID.john, .amy]).union(markers)
-        case .other:
-            return owner.map { Set([$0]) } ?? Set([.john, .amy])
-        case .inactiveUnclassified:
-            return markers.isEmpty ? [] : markers
+            return Set(BriefingAudience.allCases)
+        case .other, .inactiveUnclassified:
+            return owner.defaultRelevantAudiences
         }
     }
 
@@ -334,27 +532,18 @@ public struct ReadyRoomRulesEngine: Sendable {
     private func traceEntries(
         for event: RawCalendarEvent,
         role: CalendarRole,
-        owner: PersonID?,
         markers: Set<PersonID>,
-        relevance: Set<PersonID>
+        ownerDecision: OwnerDecision,
+        audienceDecision: AudienceDecision
     ) -> [DecisionTraceEntry] {
         var entries = [
             DecisionTraceEntry(
                 ruleID: "calendar.role",
                 summary: "Calendar role resolved",
                 detail: "\(event.calendarTitle) resolved as \(role.rawValue)"
-            )
+            ),
+            ownerDecision.traceEntry
         ]
-
-        if let owner {
-            entries.append(
-                DecisionTraceEntry(
-                    ruleID: "calendar.owner",
-                    summary: "Owner inferred",
-                    detail: "Owner resolved as \(owner.displayName)"
-                )
-            )
-        }
 
         if !markers.isEmpty {
             entries.append(
@@ -366,19 +555,31 @@ public struct ReadyRoomRulesEngine: Sendable {
             )
         }
 
-        entries.append(
-            DecisionTraceEntry(
-                ruleID: "relevance.apply",
-                summary: "Relevant people resolved",
-                detail: relevance.map(\.displayName).sorted().joined(separator: ", ")
-            )
-        )
+        entries.append(audienceDecision.traceEntry)
         return entries
     }
 
     private func familyRelevant(_ event: RawCalendarEvent) -> Bool {
         let text = [event.title, event.notes].compactMap { $0 }.joined(separator: " ").lowercased()
-        return text.contains("family") || text.contains("pickup") || text.contains("dropoff") || text.contains("school")
+        let keywords = [
+            "family",
+            "pickup",
+            "pick-up",
+            "dropoff",
+            "drop-off",
+            "school",
+            "soccer",
+            "dance",
+            "kid",
+            "kids",
+            "daycare",
+            "camp",
+            "recital",
+            "practice",
+            "parent teacher",
+            "parent-teacher"
+        ]
+        return keywords.contains(where: text.contains)
     }
 
     private func detectedPeople(in text: String) -> Set<PersonID> {
@@ -391,6 +592,54 @@ public struct ReadyRoomRulesEngine: Sendable {
         return detected
     }
 
+    private func adultMarkers(in markers: Set<PersonID>) -> [BriefingAudience] {
+        BriefingAudience.allCases.filter { markers.contains($0.person) }
+    }
+
+    private func kidMarkers(in markers: Set<PersonID>) -> [PersonID] {
+        [.ellie, .mia].filter { markers.contains($0) }
+    }
+
+    private func adultAudienceSet(from markers: Set<PersonID>) -> Set<BriefingAudience> {
+        Set(adultMarkers(in: markers))
+    }
+
+    private func matchedKeywordOwnerOverride(
+        for event: RawCalendarEvent,
+        configuration: CalendarConfiguration?
+    ) -> (keyword: String, owner: PersonID)? {
+        guard let overrides = configuration?.keywordOwnerOverrides else {
+            return nil
+        }
+        return overrides.first { pair in
+            let key = pair.key
+            return event.title.localizedCaseInsensitiveContains(key) ||
+            (event.notes?.localizedCaseInsensitiveContains(key) ?? false)
+        }.map { pair in
+            (keyword: pair.key, owner: pair.value)
+        }
+    }
+
+    private func defaultSummary(for configuration: CalendarConfiguration) -> String {
+        let roleSummary = configuration.role?.rawValue ?? "inferred role"
+        let ownerSummary = configuration.owner?.displayName ?? "automatic owner"
+        return "\(roleSummary), \(ownerSummary), \(audienceSummary(configuration.defaultRelevantAudiences))"
+    }
+
+    private static func audienceSummary(_ audiences: Set<BriefingAudience>) -> String {
+        if audiences.isEmpty {
+            return "no briefings"
+        }
+        return BriefingAudience.allCases
+            .filter { audiences.contains($0) }
+            .map(\.displayName)
+            .joined(separator: ", ")
+    }
+
+    private func audienceSummary(_ audiences: Set<BriefingAudience>) -> String {
+        Self.audienceSummary(audiences)
+    }
+
     private func shouldMarkConflict(for item: NormalizedItem) -> Bool {
         guard item.sourceType == .calendar else {
             return false
@@ -398,7 +647,6 @@ public struct ReadyRoomRulesEngine: Sendable {
         if item.calendarRole == .kidRelated || item.calendarRole == .sharedFamily {
             return true
         }
-        let relevantAdults = item.relevantPeople.intersection([.john, .amy])
-        return item.lifeArea != .work && !relevantAdults.isEmpty
+        return item.lifeArea != .work && !item.relevantAudiences.isEmpty
     }
 }

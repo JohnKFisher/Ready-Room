@@ -25,7 +25,7 @@ Implemented in this foundation pass:
 
 - SwiftPM app + target split for `Core`, `Persistence`, `Connectors`, `Briefings`, and `App`
 - normalized domain models and decision-trace structures
-- rules engine for calendar relevance, work/home classification, due-soon logic, change tracking, and conflict detection
+- rules engine for required calendar ownership, adult-only briefing relevance, work/home classification, due-soon logic, change tracking, and conflict detection
 - file-based shared/local storage scaffolding, YAML obligations store, Keychain-backed secrets, and send/archive stores
 - connector scaffolding for EventKit, weather, news, and Plex-family services
 - deterministic briefing composer with truthful preferred-vs-actual AI fallback disclosure
@@ -37,10 +37,11 @@ Implemented in this foundation pass:
 - open apps now reload shared obligations on refresh and watch the shared obligations file timestamp during the existing minute loop so cross-Mac updates can appear without relaunch
 - calendar items are only marked cancelled when the source explicitly reports cancellation, and the dashboard now keeps yesterday visible until 3:00 AM while dimming finished items as complete
 - dashboard and briefing day breaks now use a fixed five-day window: `Today`, `Tomorrow`, and a combined `Upcoming` bucket for the next visible future days, while the dashboard still preserves the overnight `Yesterday` carry window
-- dashboard timeline items and briefing event rows now show subtle person-based accent colors driven by shared, customizable John/Amy/Ellie/Mia palette settings
+- dashboard timeline items and briefing event rows now use owner-based accent colors driven by shared, customizable John/Amy/Ellie/Mia palette settings
 - the app now has a real icon workspace, deterministic iconset generation script, and bundled `.icns` packaging path instead of shipping without a proper app icon
 - the timeline remains permissive for calendar items even when their dashboard include-flag is false, preventing a regression where the main timeline appeared nearly empty
 - the Settings sidebar now uses explicit tagged sidebar rows so subsection selection works reliably on macOS
+- the Calendars settings page is now real: it lists discovered calendars, saves shared per-calendar role/default-owner/default-relevance defaults, and shows read-only preview rows with the current owner/relevance trace for recent events
 - the Storage/Sync screen now distinguishes between iCloud not being active for the current build/Mac and files simply not having been created yet
 - obligation occurrences now use the same carry-yesterday-until-3:00-AM day boundary as the timeline, so late-night recurring items stay attached to the expected day group
 - multi-day all-day events now appear on each day they cover in the timeline instead of only their start day, and they are only marked complete after their final covered day
@@ -61,6 +62,7 @@ Implemented in this foundation pass:
 Still open after this pass:
 
 - richer live connector configuration and authentication UX beyond weather/news's current path
+- item-level correction workflows and keyword-owner rule editing beyond the new per-calendar defaults screen
 - production-grade Foundation Models prompt integration
 - full setup wizard persistence and permissions UX
 - app bundling/signing refinement and runtime smoke-testing against real local services

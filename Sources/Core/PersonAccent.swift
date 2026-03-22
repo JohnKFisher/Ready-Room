@@ -126,55 +126,30 @@ public enum ItemAudienceAccentResolver {
     public static let neutralHex = "#8A94A6"
 
     public static func resolve(for item: NormalizedItem, palette: PersonColorPaletteSettings) -> ItemAudienceAccent {
-        resolve(owner: item.owner, relevantPeople: item.relevantPeople, palette: palette)
+        resolve(owner: item.owner, palette: palette)
     }
 
-    public static func resolve(
-        owner: PersonID?,
-        relevantPeople: Set<PersonID>,
-        palette: PersonColorPaletteSettings
-    ) -> ItemAudienceAccent {
-        let orderedPeople = orderedPeople(owner: owner, relevantPeople: relevantPeople)
-        if orderedPeople.isEmpty == false {
-            let tokens = orderedPeople.map { person in
-                AudienceAccentToken(
-                    id: person.rawValue,
-                    label: person.displayName,
-                    shortLabel: shortLabel(for: person),
-                    hex: palette.hex(for: person),
-                    person: person
-                )
-            }
-            return ItemAudienceAccent(tokens: tokens, primaryHex: tokens.first?.hex ?? neutralHex, isNeutralFallback: false)
+    public static func resolve(owner: PersonID, palette: PersonColorPaletteSettings) -> ItemAudienceAccent {
+        if owner == .family {
+            let token = AudienceAccentToken(
+                id: "fallback-family",
+                label: "Family",
+                shortLabel: "F",
+                hex: neutralHex,
+                person: .family,
+                fallbackKind: .family
+            )
+            return ItemAudienceAccent(tokens: [token], primaryHex: neutralHex, isNeutralFallback: true)
         }
 
-        let fallbackKind: AudienceAccentFallbackKind = relevantPeople.contains(.family) || owner == .family ? .family : .general
         let token = AudienceAccentToken(
-            id: "fallback-\(fallbackKind.rawValue)",
-            label: fallbackKind == .family ? "Family" : "General",
-            shortLabel: fallbackKind == .family ? "F" : "G",
-            hex: neutralHex,
-            fallbackKind: fallbackKind
+            id: owner.rawValue,
+            label: owner.displayName,
+            shortLabel: shortLabel(for: owner),
+            hex: palette.hex(for: owner),
+            person: owner
         )
-        return ItemAudienceAccent(tokens: [token], primaryHex: neutralHex, isNeutralFallback: true)
-    }
-
-    public static func orderedPeople(owner: PersonID?, relevantPeople: Set<PersonID>) -> [PersonID] {
-        var namedPeople = relevantPeople.intersection([.john, .amy, .ellie, .mia])
-        if let owner, owner != .family {
-            namedPeople.insert(owner)
-        }
-        var ordered: [PersonID] = []
-
-        if let owner, owner != .family, namedPeople.contains(owner) {
-            ordered.append(owner)
-        }
-
-        for person in [PersonID.john, .amy, .ellie, .mia] where namedPeople.contains(person) && ordered.contains(person) == false {
-            ordered.append(person)
-        }
-
-        return ordered
+        return ItemAudienceAccent(tokens: [token], primaryHex: token.hex, isNeutralFallback: false)
     }
 
     private static func shortLabel(for person: PersonID) -> String {

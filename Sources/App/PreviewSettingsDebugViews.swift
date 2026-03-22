@@ -257,7 +257,7 @@ struct SettingsView: View {
                     case .general:
                         settingsCard("General", body: "Personal-app-first defaults, setup rerun support, and local-first behavior live here.")
                     case .calendars:
-                        settingsCard("Calendars", body: "EventKit-first calendar discovery, role confirmation, and include/exclude controls.")
+                        CalendarsSettingsView(model: model)
                     case .briefings:
                         settingsCard("Briefings", body: "Recipient lists, briefing-only mode, and section behavior will be configured here.")
                     case .dashboard:
@@ -326,6 +326,324 @@ struct SettingsView: View {
     }
 }
 
+private struct CalendarsSettingsView: View {
+    @ObservedObject var model: ReadyRoomAppModel
+    @State private var draftConfigurations: [CalendarConfiguration] = []
+
+    private struct CalendarDiscovery: Identifiable, Hashable {
+        let calendarIdentifier: String
+        let displayName: String
+        let eventCount: Int
+
+        var id: String { calendarIdentifier }
+    }
+
+    private var discoveredCalendars: [CalendarDiscovery] {
+        let snapshotEvents = model.snapshot(for: .calendar)?.calendarEvents ?? []
+        let configurationMap = ReadyRoomCollections.dictionaryLastValueWins(
+            from: model.calendarConfigurations.map { ($0.calendarIdentifier, $0) }
+        )
+        var titles: [String: String] = [:]
+        var counts: [String: Int] = [:]
+
+        for event in snapshotEvents {
+            titles[event.calendarIdentifier] = event.calendarTitle
+            counts[event.calendarIdentifier, default: 0] += 1
+        }
+
+        return Set(counts.keys).union(configurationMap.keys)
+            .map { identifier in
+                CalendarDiscovery(
+                    calendarIdentifier: identifier,
+                    displayName: titles[identifier] ?? configurationMap[identifier]?.displayName ?? identifier,
+                    eventCount: counts[identifier] ?? 0
+                )
+            }
+            .sorted {
+                if $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedSame {
+                    return $0.calendarIdentifier.localizedCaseInsensitiveCompare($1.calendarIdentifier) == .orderedAscending
+                }
+                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+    }
+
+    private var hasUnsavedChanges: Bool {
+        normalizedDraftConfigurations != model.calendarConfigurations
+    }
+
+    private var normalizedDraftConfigurations: [CalendarConfiguration] {
+        draftConfigurations.sorted {
+            if $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedSame {
+                return $0.calendarIdentifier.localizedCaseInsensitiveCompare($1.calendarIdentifier) == .orderedAscending
+            }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Calendars")
+                    .font(.headline)
+                Text("Set per-calendar role, default owner, dashboard inclusion, and default briefing relevance. These defaults sync across Macs, but strong event clues can still override them on specific items.")
+                    .foregroundStyle(.secondary)
+                if let placeholder = model.placeholderLabel(for: .calendar) {
+                    Text(placeholder)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Button("Save Calendar Settings") {
+                        Task { await model.saveCalendarConfigurations(normalizedDraftConfigurations) }
+                    }
+                    .disabled(hasUnsavedChanges == false)
+                    Button("Refresh Calendars") {
+                        Task { await model.refresh() }
+                    }
+                    Spacer()
+                    if discoveredCalendars.isEmpty == false {
+                        Text("\(discoveredCalendars.count) calendar(s)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(model.calendarSettingsStatusMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let error = model.calendarSettingsError {
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+
+            if discoveredCalendars.isEmpty {
+                ContentUnavailableView(
+                    "No Calendars Yet",
+                    systemImage: "calendar.badge.exclamationmark",
+                    description: Text("Grant Calendar access or refresh while sample calendar data is active to configure defaults.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 260)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            } else {
+                ForEach(discoveredCalendars) { calendar in
+                    calendarCard(for: calendar)
+                }
+            }
+        }
+        .onAppear {
+            syncDraftFromModel()
+        }
+        .onChange(of: model.calendarConfigurations) { _, _ in
+            syncDraftFromModel()
+        }
+    }
+
+    private func calendarCard(for calendar: CalendarDiscovery) -> some View {
+        let previewItems = previewItems(for: calendar)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(calendar.displayName)
+                        .font(.headline)
+                    Text(calendar.calendarIdentifier)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(calendar.eventCount) visible event(s)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 10) {
+                GridRow {
+                    Text("Role")
+                    Picker("Role", selection: binding(for: calendar, keyPath: \.role)) {
+                        Text("Automatic").tag(CalendarRole?.none)
+                        ForEach(CalendarRole.allCases, id: \.self) { role in
+                            Text(roleLabel(role)).tag(CalendarRole?.some(role))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                GridRow {
+                    Text("Default Owner")
+                    Picker("Default Owner", selection: binding(for: calendar, keyPath: \.owner)) {
+                        Text("Automatic").tag(PersonID?.none)
+                        Text("Family").tag(PersonID?.some(.family))
+                        Text("John").tag(PersonID?.some(.john))
+                        Text("Amy").tag(PersonID?.some(.amy))
+                        Text("Ellie").tag(PersonID?.some(.ellie))
+                        Text("Mia").tag(PersonID?.some(.mia))
+                    }
+                    .pickerStyle(.menu)
+                }
+                GridRow {
+                    Text("Dashboard")
+                    Toggle("Include on Dashboard", isOn: binding(for: calendar, keyPath: \.includeOnDashboard))
+                        .toggleStyle(.switch)
+                }
+                GridRow {
+                    Text("Default Relevance")
+                    HStack(spacing: 14) {
+                        Toggle("John", isOn: binding(for: calendar, keyPath: \.includeInJohnBriefing))
+                            .toggleStyle(.switch)
+                        Toggle("Amy", isOn: binding(for: calendar, keyPath: \.includeInAmyBriefing))
+                            .toggleStyle(.switch)
+                    }
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Preview")
+                    .font(.subheadline.weight(.semibold))
+                if previewItems.isEmpty {
+                    Text("No currently visible events from this calendar.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(previewItems) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(previewTime(for: item))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("Owner: \(item.owner.displayName) • Relevant to: \(relevanceSummary(for: item))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(traceSummary(for: item))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func configuration(for calendar: CalendarDiscovery) -> CalendarConfiguration {
+        normalizedDraftConfigurations.first(where: { $0.calendarIdentifier == calendar.calendarIdentifier }) ??
+        CalendarConfiguration(
+            calendarIdentifier: calendar.calendarIdentifier,
+            displayName: calendar.displayName
+        )
+    }
+
+    private func binding<Value>(
+        for calendar: CalendarDiscovery,
+        keyPath: WritableKeyPath<CalendarConfiguration, Value>
+    ) -> Binding<Value> {
+        Binding {
+            configuration(for: calendar)[keyPath: keyPath]
+        } set: { newValue in
+            updateConfiguration(for: calendar) { configuration in
+                configuration[keyPath: keyPath] = newValue
+            }
+        }
+    }
+
+    private func updateConfiguration(
+        for calendar: CalendarDiscovery,
+        mutate: (inout CalendarConfiguration) -> Void
+    ) {
+        var configurations = ReadyRoomCollections.dictionaryLastValueWins(
+            from: draftConfigurations.map { ($0.calendarIdentifier, $0) }
+        )
+        var configuration = configurations[calendar.calendarIdentifier] ??
+        CalendarConfiguration(
+            calendarIdentifier: calendar.calendarIdentifier,
+            displayName: calendar.displayName
+        )
+        configuration.displayName = calendar.displayName
+        mutate(&configuration)
+        configurations[calendar.calendarIdentifier] = configuration
+        draftConfigurations = configurations.values.sorted {
+            if $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedSame {
+                return $0.calendarIdentifier.localizedCaseInsensitiveCompare($1.calendarIdentifier) == .orderedAscending
+            }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    private func previewItems(for calendar: CalendarDiscovery) -> [NormalizedItem] {
+        model.normalizedItems
+            .filter { $0.metadata["calendarIdentifier"] == calendar.calendarIdentifier }
+            .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+            .prefix(4)
+            .map { $0 }
+    }
+
+    private func previewTime(for item: NormalizedItem) -> String {
+        guard let start = item.startDate else {
+            return item.isAllDay ? "All day" : "TBD"
+        }
+        if item.isAllDay {
+            return start.formattedMonthDayWeekday()
+        }
+        return start.formattedMonthDayWeekday() + " at " + start.formattedClock()
+    }
+
+    private func relevanceSummary(for item: NormalizedItem) -> String {
+        let names = item.relevantAudienceDisplayNames
+        return names.isEmpty ? "No briefings" : names.joined(separator: ", ")
+    }
+
+    private func traceSummary(for item: NormalizedItem) -> String {
+        let entries = item.trace.appliedRules.filter {
+            $0.ruleID.hasPrefix("calendar.owner") || $0.ruleID.hasPrefix("calendar.relevance")
+        }
+        let text = entries.map(\.detail).joined(separator: " ")
+        return text.isEmpty ? "No owner/relevance trace available." : text
+    }
+
+    private func roleLabel(_ role: CalendarRole) -> String {
+        switch role {
+        case .work:
+            "Work"
+        case .sharedFamily:
+            "Shared Family"
+        case .kidRelated:
+            "Kid Related"
+        case .other:
+            "Other"
+        case .inactiveUnclassified:
+            "Inactive / Unclassified"
+        }
+    }
+
+    private func syncDraftFromModel() {
+        draftConfigurations = model.calendarConfigurations.sorted {
+            if $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedSame {
+                return $0.calendarIdentifier.localizedCaseInsensitiveCompare($1.calendarIdentifier) == .orderedAscending
+            }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+}
+
 private struct DashboardSettingsView: View {
     @ObservedObject var model: ReadyRoomAppModel
     @State private var johnColor = Color(readyRoomHex: PersonColorPaletteSettings.defaultJohnHex, fallback: .systemBlue)
@@ -347,7 +665,7 @@ private struct DashboardSettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Dashboard")
                     .font(.headline)
-                Text("Audience colors are shared across Macs and also appear in briefing previews and sends. Dashboard card order remains local per Mac.")
+                Text("People colors are shared across Macs and now drive owner-based timeline and briefing accents. Dashboard card order remains local per Mac.")
                     .foregroundStyle(.secondary)
             }
             .padding()
@@ -364,7 +682,7 @@ private struct DashboardSettingsView: View {
                 ColorPicker("Mia", selection: $miaColor, supportsOpacity: false)
 
                 HStack {
-                    Button("Save Audience Colors") {
+                    Button("Save People Colors") {
                         Task { await model.savePersonColorPalette(draftPalette) }
                     }
                     Button("Reset to Defaults") {
@@ -390,24 +708,24 @@ private struct DashboardSettingsView: View {
                     .font(.headline)
 
                 AudienceAccentPreviewCard(
-                    title: "John solo",
-                    subtitle: "Home Office",
-                    accent: ItemAudienceAccentResolver.resolve(owner: .john, relevantPeople: [.john], palette: draftPalette)
+                    title: "John work block",
+                    subtitle: "Owner: John",
+                    accent: ItemAudienceAccentResolver.resolve(owner: .john, palette: draftPalette)
                 )
                 AudienceAccentPreviewCard(
-                    title: "School pickup",
-                    subtitle: "John + Amy",
-                    accent: ItemAudienceAccentResolver.resolve(owner: nil, relevantPeople: [.john, .amy], palette: draftPalette)
+                    title: "Amy errand",
+                    subtitle: "Owner: Amy",
+                    accent: ItemAudienceAccentResolver.resolve(owner: .amy, palette: draftPalette)
                 )
                 AudienceAccentPreviewCard(
-                    title: "Band concert",
-                    subtitle: "John + Amy + Ellie",
-                    accent: ItemAudienceAccentResolver.resolve(owner: nil, relevantPeople: [.john, .amy, .ellie], palette: draftPalette)
+                    title: "Ellie recital",
+                    subtitle: "Owner: Ellie",
+                    accent: ItemAudienceAccentResolver.resolve(owner: .ellie, palette: draftPalette)
                 )
                 AudienceAccentPreviewCard(
                     title: "Family admin",
-                    subtitle: "Neutral fallback",
-                    accent: ItemAudienceAccentResolver.resolve(owner: nil, relevantPeople: [.family], palette: draftPalette)
+                    subtitle: "Owner: Family",
+                    accent: ItemAudienceAccentResolver.resolve(owner: .family, palette: draftPalette)
                 )
             }
             .padding()

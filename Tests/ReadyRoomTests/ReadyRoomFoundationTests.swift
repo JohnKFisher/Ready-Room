@@ -22,8 +22,9 @@ struct ReadyRoomFoundationTests {
 
         let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
         #expect(items.count == 1)
-        #expect(items[0].relevantPeople.contains(.john))
-        #expect(items[0].relevantPeople.contains(.amy))
+        #expect(items[0].owner == .ellie)
+        #expect(items[0].relevantAudiences.contains(.john))
+        #expect(items[0].relevantAudiences.contains(.amy))
         #expect(items[0].inclusion.johnBriefing)
         #expect(items[0].inclusion.amyBriefing)
     }
@@ -43,8 +44,137 @@ struct ReadyRoomFoundationTests {
         )
 
         let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+        #expect(items[0].owner == .amy)
+        #expect(items[0].relevantAudiences == Set([.amy]))
         #expect(items[0].inclusion.amyBriefing)
         #expect(items[0].inclusion.johnBriefing == false)
+    }
+
+    @Test
+    func bothAdultsEventResolvesFamilyOwnerAndBothBriefings() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "shared-adults",
+            calendarIdentifier: "shared",
+            calendarTitle: "Family Shared",
+            title: "Amy and John dinner",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600)
+        )
+
+        let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .family)
+        #expect(items[0].relevantAudiences == Set([.john, .amy]))
+    }
+
+    @Test
+    func ambiguousFamilyLogisticsFallsBackToFamilyOwnerAndBothBriefings() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "logistics",
+            calendarIdentifier: "shared",
+            calendarTitle: "Family Shared",
+            title: "School pickup",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600)
+        )
+
+        let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .family)
+        #expect(items[0].relevantAudiences == Set([.john, .amy]))
+    }
+
+    @Test
+    func calendarDefaultSeedsOwnerAndRelevanceWhenTextIsWeak() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let configuration = CalendarConfiguration(
+            calendarIdentifier: "amy-home",
+            displayName: "Amy Home",
+            role: .other,
+            owner: .amy,
+            includeOnDashboard: true,
+            includeInJohnBriefing: false,
+            includeInAmyBriefing: true
+        )
+        let event = RawCalendarEvent(
+            id: "weak-default",
+            calendarIdentifier: "amy-home",
+            calendarTitle: "Amy Home",
+            title: "Appointment",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600)
+        )
+
+        let items = engine.normalizeCalendarEvents(
+            [event],
+            source: source,
+            configurations: [configuration.calendarIdentifier: configuration],
+            health: .healthy
+        )
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .amy)
+        #expect(items[0].relevantAudiences == Set([.amy]))
+    }
+
+    @Test
+    func strongKidClueOverridesCalendarDefaults() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let configuration = CalendarConfiguration(
+            calendarIdentifier: "amy-home",
+            displayName: "Amy Home",
+            role: .other,
+            owner: .amy,
+            includeOnDashboard: true,
+            includeInJohnBriefing: false,
+            includeInAmyBriefing: true
+        )
+        let event = RawCalendarEvent(
+            id: "kid-override",
+            calendarIdentifier: "amy-home",
+            calendarTitle: "Amy Home",
+            title: "Ellie practice",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600)
+        )
+
+        let items = engine.normalizeCalendarEvents(
+            [event],
+            source: source,
+            configurations: [configuration.calendarIdentifier: configuration],
+            health: .healthy
+        )
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .ellie)
+        #expect(items[0].relevantAudiences == Set([.john, .amy]))
+    }
+
+    @Test
+    func ownerFallsBackToFamilyWhenNoOtherClueExists() {
+        let engine = ReadyRoomRulesEngine()
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let event = RawCalendarEvent(
+            id: "fallback",
+            calendarIdentifier: "misc",
+            calendarTitle: "Misc",
+            title: "Appointment",
+            startDate: Date(),
+            endDate: Date().addingTimeInterval(3600)
+        )
+
+        let items = engine.normalizeCalendarEvents([event], source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].owner == .family)
     }
 
     @Test
@@ -273,7 +403,7 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
-    func briefingComposerIncludesAudienceChipsInMarkup() {
+    func briefingComposerUsesOwnerOnlyChipsInMarkup() {
         let calendar = Calendar.readyRoomGregorian
         let source = SourceDescriptor(id: "calendar", displayName: "Calendar", type: .calendar)
         let item = NormalizedItem(
@@ -281,10 +411,11 @@ struct ReadyRoomFoundationTests {
             source: source,
             sourceIdentifier: "pickup",
             sourceType: .calendar,
-            title: "School pickup",
+            title: "Ellie pickup",
             startDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 15, minute: 0))!,
             endDate: calendar.date(from: DateComponents(year: 2026, month: 3, day: 14, hour: 16, minute: 0))!,
-            relevantPeople: [.john, .amy]
+            owner: .ellie,
+            relevantAudiences: Set([.john, .amy])
         )
         let request = BriefingRequest(
             audience: .john,
@@ -301,19 +432,19 @@ struct ReadyRoomFoundationTests {
 
         let artifact = BriefingComposer().compose(request: request, recipients: ["john@example.com"], openingLine: opening, newsSummary: news)
         let plainText = EmailBodyProjection.plainTextAlternative(for: artifact)
-        let titleIndex = artifact.bodyHTML.range(of: "School pickup")?.lowerBound
-        let audienceIndex = artifact.bodyHTML.range(of: ">J<")?.lowerBound
+        let titleIndex = artifact.bodyHTML.range(of: "Ellie pickup")?.lowerBound
+        let audienceIndex = artifact.bodyHTML.range(of: ">E<")?.lowerBound
 
-        #expect(artifact.bodyHTML.contains(">J<"))
-        #expect(artifact.bodyHTML.contains(">A<"))
-        #expect(artifact.bodyHTML.contains("#3478F6"))
-        #expect(artifact.bodyHTML.contains("#39A96B"))
+        #expect(artifact.bodyHTML.contains(">E<"))
+        #expect(artifact.bodyHTML.contains(">J<") == false)
+        #expect(artifact.bodyHTML.contains(">A<") == false)
+        #expect(artifact.bodyHTML.contains("#B58AF7"))
         #expect(titleIndex != nil)
         #expect(audienceIndex != nil)
         if let titleIndex, let audienceIndex {
             #expect(titleIndex < audienceIndex)
         }
-        #expect(plainText.contains("School pickup [J/A]"))
+        #expect(plainText.contains("Ellie pickup [E]"))
     }
 
     @Test
@@ -1028,7 +1159,6 @@ struct ReadyRoomFoundationTests {
     func audienceAccentResolverReturnsSingleNamedPerson() {
         let accent = ItemAudienceAccentResolver.resolve(
             owner: .john,
-            relevantPeople: [.john],
             palette: .default
         )
 
@@ -1038,61 +1168,72 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
-    func audienceAccentResolverKeepsTwoPeopleInStableOrder() {
-        let accent = ItemAudienceAccentResolver.resolve(
-            owner: nil,
-            relevantPeople: [.amy, .john],
-            palette: .default
+    func audienceAccentResolverUsesOwnerOnlyAccentEvenWhenBothParentsAreRelevant() {
+        let item = NormalizedItem(
+            id: "calendar:kid",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "kid",
+            sourceType: .calendar,
+            title: "Ellie recital",
+            owner: .ellie,
+            relevantAudiences: Set([.john, .amy])
         )
+        let accent = ItemAudienceAccentResolver.resolve(for: item, palette: .default)
 
-        #expect(accent.tokens.map(\.label) == ["John", "Amy"])
-        #expect(accent.tokens.map(\.hex) == ["#3478F6", "#39A96B"])
-    }
-
-    @Test
-    func audienceAccentResolverPlacesOwnerFirstForThreeOrMorePeople() {
-        let accent = ItemAudienceAccentResolver.resolve(
-            owner: .amy,
-            relevantPeople: [.john, .amy, .ellie],
-            palette: .default
-        )
-
-        #expect(accent.tokens.map(\.label) == ["Amy", "John", "Ellie"])
-        #expect(accent.primaryHex == "#39A96B")
-    }
-
-    @Test
-    func audienceAccentResolverIgnoresFamilyWhenNamedPeopleExist() {
-        let accent = ItemAudienceAccentResolver.resolve(
-            owner: nil,
-            relevantPeople: [.family, .john, .mia],
-            palette: .default
-        )
-
-        #expect(accent.tokens.map(\.label) == ["John", "Mia"])
-        #expect(accent.tokens.contains(where: { $0.label == "Family" }) == false)
+        #expect(accent.tokens.map(\.label) == ["Ellie"])
+        #expect(accent.primaryHex == "#B58AF7")
         #expect(accent.isNeutralFallback == false)
     }
 
     @Test
-    func audienceAccentResolverUsesNeutralFallbackForFamilyOrUnresolved() {
+    func audienceAccentResolverUsesNeutralFallbackForFamilyOwner() {
         let familyAccent = ItemAudienceAccentResolver.resolve(
-            owner: nil,
-            relevantPeople: [.family],
-            palette: .default
-        )
-        let generalAccent = ItemAudienceAccentResolver.resolve(
-            owner: nil,
-            relevantPeople: [],
+            owner: .family,
             palette: .default
         )
 
         #expect(familyAccent.tokens.map(\.label) == ["Family"])
         #expect(familyAccent.primaryHex == ItemAudienceAccentResolver.neutralHex)
         #expect(familyAccent.isNeutralFallback)
-        #expect(generalAccent.tokens.map(\.label) == ["General"])
-        #expect(generalAccent.primaryHex == ItemAudienceAccentResolver.neutralHex)
-        #expect(generalAccent.isNeutralFallback)
+    }
+
+    @Test
+    func normalizedItemDecodesLegacyRelevantPeopleIntoAdultRelevance() throws {
+        let json = """
+        {
+          "id": "calendar:legacy",
+          "source": {
+            "id": "calendar",
+            "displayName": "Calendars",
+            "type": "calendar"
+          },
+          "sourceIdentifier": "legacy",
+          "sourceType": "calendar",
+          "title": "Legacy item",
+          "isAllDay": false,
+          "owner": null,
+          "relevantPeople": ["family", "john", "mia"],
+          "lifeArea": "home",
+          "confidence": 1,
+          "inclusion": {
+            "dashboard": true,
+            "johnBriefing": true,
+            "amyBriefing": true
+          },
+          "changeState": "unchanged",
+          "sourceHealth": "healthy",
+          "trace": {
+            "sourceFacts": [],
+            "appliedRules": [],
+            "overrides": []
+          },
+          "metadata": {}
+        }
+        """
+        let item = try JSONDecoder().decode(NormalizedItem.self, from: Data(json.utf8))
+
+        #expect(item.owner == .family)
+        #expect(item.relevantAudiences == Set([.john, .amy]))
     }
 
     @Test

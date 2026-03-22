@@ -77,8 +77,11 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var newsSettings = NewsSettings()
     @Published var newsSettingsStatusMessage = "Ready Room uses official RSS and Atom feeds for live news."
     @Published var newsSettingsError: String?
+    @Published var calendarConfigurations: [CalendarConfiguration] = []
+    @Published var calendarSettingsStatusMessage = "Calendar defaults are shared across Macs. Strong event clues still win when a specific event is clearly owned or relevant."
+    @Published var calendarSettingsError: String?
     @Published var personColorPaletteSettings = PersonColorPaletteSettings.default
-    @Published var personColorPaletteStatusMessage = "Audience colors are shared across Macs and used in the dashboard and briefings."
+    @Published var personColorPaletteStatusMessage = "People colors are shared across Macs and used for owner-based accents in the dashboard and briefings."
     @Published var personColorPaletteError: String?
     @Published var storagePreferences = StoragePreferences()
     @Published var storageStatus: StorageStatus?
@@ -150,6 +153,7 @@ final class ReadyRoomAppModel: ObservableObject {
             await refreshSMTPPasswordStored(for: senderSettings.smtp)
             weatherSettings = try await weatherSettingsStore.load()
             newsSettings = try await newsSettingsStore.load()
+            calendarConfigurations = try await calendarStore.load()
             personColorPaletteSettings = try await personColorPaletteStore.load()
             lastGoodNewsSnapshot = try await lastGoodNewsSnapshotStore.load()
             await ensureWeatherSettingsResolvedIfNeeded()
@@ -375,29 +379,47 @@ final class ReadyRoomAppModel: ObservableObject {
         }
     }
 
+    func saveCalendarConfigurations(_ configurations: [CalendarConfiguration]) async {
+        let normalized = normalizedCalendarConfigurations(configurations)
+
+        do {
+            try await calendarStore.save(normalized)
+            calendarConfigurations = normalized
+            calendarSettingsError = nil
+            calendarSettingsStatusMessage = "Saved calendar defaults. Strong event clues can still override them for specific items."
+            await refreshStorageStatus()
+            await enqueueRefresh(.calendar)
+            statusMessage = "Saved calendar settings."
+        } catch {
+            calendarSettingsError = error.localizedDescription
+            calendarSettingsStatusMessage = "Calendar settings were not changed."
+            statusMessage = "Could not save calendar settings: \(error.localizedDescription)"
+        }
+    }
+
     func savePersonColorPalette(_ settings: PersonColorPaletteSettings) async {
         let normalized = settings.normalized()
         do {
             try await personColorPaletteStore.save(normalized)
             personColorPaletteSettings = normalized
             personColorPaletteError = nil
-            personColorPaletteStatusMessage = "Saved audience colors. These colors sync across Macs and update briefings too."
+            personColorPaletteStatusMessage = "Saved people colors. These colors sync across Macs and update briefings too."
             await refreshStorageStatus()
             await generateNarrativesAndPreviews()
             updateDebugJSON()
-            statusMessage = "Saved dashboard audience colors."
+            statusMessage = "Saved dashboard people colors."
         } catch {
             personColorPaletteError = error.localizedDescription
-            personColorPaletteStatusMessage = "Audience colors were not changed."
-            statusMessage = "Could not save audience colors: \(error.localizedDescription)"
+            personColorPaletteStatusMessage = "People colors were not changed."
+            statusMessage = "Could not save people colors: \(error.localizedDescription)"
         }
     }
 
     func resetPersonColorPaletteToDefaults() async {
         await savePersonColorPalette(.default)
         if personColorPaletteError == nil {
-            personColorPaletteStatusMessage = "Reset audience colors to the default palette."
-            statusMessage = "Reset audience colors to defaults."
+            personColorPaletteStatusMessage = "Reset people colors to the default palette."
+            statusMessage = "Reset people colors to defaults."
         }
     }
 
@@ -523,6 +545,20 @@ final class ReadyRoomAppModel: ObservableObject {
         }
     }
 
+    private func syncCalendarConfigurationsFromStore() async {
+        do {
+            let latestConfigurations = try await calendarStore.load()
+            if latestConfigurations != calendarConfigurations {
+                calendarConfigurations = latestConfigurations
+            }
+            calendarSettingsError = nil
+            calendarSettingsStatusMessage = "Calendar defaults are shared across Macs. Strong event clues still win when a specific event is clearly owned or relevant."
+        } catch {
+            calendarSettingsError = error.localizedDescription
+            calendarSettingsStatusMessage = "Calendar settings need attention."
+        }
+    }
+
     private func syncPersonColorPaletteFromStore() async {
         do {
             let latestSettings = try await personColorPaletteStore.load()
@@ -530,10 +566,10 @@ final class ReadyRoomAppModel: ObservableObject {
                 personColorPaletteSettings = latestSettings
             }
             personColorPaletteError = nil
-            personColorPaletteStatusMessage = "Audience colors are shared across Macs and used in the dashboard and briefings."
+            personColorPaletteStatusMessage = "People colors are shared across Macs and used for owner-based accents in the dashboard and briefings."
         } catch {
             personColorPaletteError = error.localizedDescription
-            personColorPaletteStatusMessage = "Audience colors need attention."
+            personColorPaletteStatusMessage = "People colors need attention."
         }
     }
 
@@ -721,6 +757,7 @@ final class ReadyRoomAppModel: ObservableObject {
         statusMessage = statusMessage(for: components)
         await syncWeatherSettingsFromStore()
         await syncNewsSettingsFromStore()
+        await syncCalendarConfigurationsFromStore()
         await syncPersonColorPaletteFromStore()
         _ = await syncSharedObligations(force: components.contains(.obligations))
         let snapshots = await collectSnapshots(refreshing: components)
@@ -794,9 +831,8 @@ final class ReadyRoomAppModel: ObservableObject {
         dashboardNewsSummaryText = dashboardNewsSummary(from: headlines)
         mediaItems = mediaSnapshot?.mediaItems ?? []
 
-        let configurations = (try? await calendarStore.load()) ?? []
         let configMap = ReadyRoomCollections.dictionaryLastValueWins(
-            from: configurations.map { ($0.calendarIdentifier, $0) }
+            from: calendarConfigurations.map { ($0.calendarIdentifier, $0) }
         )
         let calendarItems = rulesEngine.normalizeCalendarEvents(
             calendarSnapshot?.calendarEvents ?? [],
@@ -903,6 +939,7 @@ final class ReadyRoomAppModel: ObservableObject {
         let payload = DebugPayload(
             now: now,
             snapshots: sourceSnapshots,
+            calendarConfigurations: calendarConfigurations,
             normalizedItems: normalizedItems,
             dueSoon: dueSoon,
             conflicts: conflicts,
@@ -929,6 +966,39 @@ final class ReadyRoomAppModel: ObservableObject {
             return "No news items made the cut this morning."
         }
         return selected.joined(separator: " Also worth noting: ")
+    }
+
+    private func normalizedCalendarConfigurations(_ configurations: [CalendarConfiguration]) -> [CalendarConfiguration] {
+        ReadyRoomCollections.dictionaryLastValueWins(
+            from: configurations.compactMap { configuration -> (String, CalendarConfiguration)? in
+                let identifier = configuration.calendarIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard identifier.isEmpty == false else {
+                    return nil
+                }
+                let displayName = configuration.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                return (
+                    identifier,
+                    CalendarConfiguration(
+                        calendarIdentifier: identifier,
+                        displayName: displayName.isEmpty ? identifier : displayName,
+                        role: configuration.role,
+                        owner: configuration.owner,
+                        includeOnDashboard: configuration.includeOnDashboard,
+                        includeInJohnBriefing: configuration.includeInJohnBriefing,
+                        includeInAmyBriefing: configuration.includeInAmyBriefing,
+                        colorHex: configuration.colorHex,
+                        keywordOwnerOverrides: configuration.keywordOwnerOverrides
+                    )
+                )
+            }
+        )
+        .values
+        .sorted {
+            if $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedSame {
+                return $0.calendarIdentifier.localizedCaseInsensitiveCompare($1.calendarIdentifier) == .orderedAscending
+            }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
     }
 
     private func statusMessage(for components: RefreshComponents) -> String {
@@ -1125,6 +1195,7 @@ final class ReadyRoomAppModel: ObservableObject {
 private struct DebugPayload: Encodable {
     let now: Date
     let snapshots: [SourceSnapshot]
+    let calendarConfigurations: [CalendarConfiguration]
     let normalizedItems: [NormalizedItem]
     let dueSoon: [NormalizedItem]
     let conflicts: [ConflictMarker]

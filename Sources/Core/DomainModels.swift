@@ -16,6 +16,25 @@ public enum PersonID: String, Codable, CaseIterable, Sendable, Hashable {
         case .family: "Family"
         }
     }
+
+    public var briefingAudience: BriefingAudience? {
+        switch self {
+        case .john: .john
+        case .amy: .amy
+        case .ellie, .mia, .family: nil
+        }
+    }
+
+    public var defaultRelevantAudiences: Set<BriefingAudience> {
+        switch self {
+        case .john:
+            [.john]
+        case .amy:
+            [.amy]
+        case .ellie, .mia, .family:
+            Set(BriefingAudience.allCases)
+        }
+    }
 }
 
 public enum BriefingAudience: String, Codable, CaseIterable, Sendable, Hashable {
@@ -244,6 +263,17 @@ public struct CalendarConfiguration: Codable, Sendable, Hashable, Identifiable {
         self.includeInAmyBriefing = includeInAmyBriefing
         self.colorHex = colorHex
         self.keywordOwnerOverrides = keywordOwnerOverrides
+    }
+
+    public var defaultRelevantAudiences: Set<BriefingAudience> {
+        var audiences: Set<BriefingAudience> = []
+        if includeInJohnBriefing {
+            audiences.insert(.john)
+        }
+        if includeInAmyBriefing {
+            audiences.insert(.amy)
+        }
+        return audiences
     }
 }
 
@@ -773,8 +803,8 @@ public struct NormalizedItem: Codable, Sendable, Hashable, Identifiable {
     public var endDate: Date?
     public var isAllDay: Bool
     public var location: String?
-    public var owner: PersonID?
-    public var relevantPeople: Set<PersonID>
+    public var owner: PersonID
+    public var relevantAudiences: Set<BriefingAudience>
     public var calendarRole: CalendarRole?
     public var lifeArea: LifeArea
     public var confidence: Double
@@ -795,8 +825,8 @@ public struct NormalizedItem: Codable, Sendable, Hashable, Identifiable {
         endDate: Date? = nil,
         isAllDay: Bool = false,
         location: String? = nil,
-        owner: PersonID? = nil,
-        relevantPeople: Set<PersonID> = [],
+        owner: PersonID = .family,
+        relevantAudiences: Set<BriefingAudience>? = nil,
         calendarRole: CalendarRole? = nil,
         lifeArea: LifeArea = .home,
         confidence: Double = 1.0,
@@ -817,7 +847,7 @@ public struct NormalizedItem: Codable, Sendable, Hashable, Identifiable {
         self.isAllDay = isAllDay
         self.location = location
         self.owner = owner
-        self.relevantPeople = relevantPeople
+        self.relevantAudiences = relevantAudiences ?? owner.defaultRelevantAudiences
         self.calendarRole = calendarRole
         self.lifeArea = lifeArea
         self.confidence = confidence
@@ -830,6 +860,107 @@ public struct NormalizedItem: Codable, Sendable, Hashable, Identifiable {
 
     public var displayLocation: String? {
         MeetingLocationDisplayFormatter.displayText(for: location)
+    }
+
+    public var relevantAudiencePeople: Set<PersonID> {
+        Set(relevantAudiences.map(\.person))
+    }
+
+    public var relevantAudienceDisplayNames: [String] {
+        BriefingAudience.allCases
+            .filter { relevantAudiences.contains($0) }
+            .map(\.displayName)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case source
+        case sourceIdentifier
+        case sourceType
+        case title
+        case notes
+        case startDate
+        case endDate
+        case isAllDay
+        case location
+        case owner
+        case relevantAudiences
+        case relevantPeople
+        case calendarRole
+        case lifeArea
+        case confidence
+        case inclusion
+        case changeState
+        case sourceHealth
+        case trace
+        case metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        source = try container.decode(SourceDescriptor.self, forKey: .source)
+        sourceIdentifier = try container.decode(String.self, forKey: .sourceIdentifier)
+        sourceType = try container.decode(SourceType.self, forKey: .sourceType)
+        title = try container.decode(String.self, forKey: .title)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        startDate = try container.decodeIfPresent(Date.self, forKey: .startDate)
+        endDate = try container.decodeIfPresent(Date.self, forKey: .endDate)
+        isAllDay = try container.decodeIfPresent(Bool.self, forKey: .isAllDay) ?? false
+        location = try container.decodeIfPresent(String.self, forKey: .location)
+        owner = try container.decodeIfPresent(PersonID.self, forKey: .owner) ?? .family
+        if let decodedAudiences = try container.decodeIfPresent(Set<BriefingAudience>.self, forKey: .relevantAudiences) {
+            relevantAudiences = decodedAudiences
+        } else {
+            let legacyRelevantPeople = try container.decodeIfPresent(Set<PersonID>.self, forKey: .relevantPeople) ?? []
+            relevantAudiences = Self.legacyRelevantAudiences(from: legacyRelevantPeople, owner: owner)
+        }
+        calendarRole = try container.decodeIfPresent(CalendarRole.self, forKey: .calendarRole)
+        lifeArea = try container.decodeIfPresent(LifeArea.self, forKey: .lifeArea) ?? .home
+        confidence = try container.decodeIfPresent(Double.self, forKey: .confidence) ?? 1.0
+        inclusion = try container.decodeIfPresent(InclusionFlags.self, forKey: .inclusion) ?? InclusionFlags()
+        changeState = try container.decodeIfPresent(ChangeState.self, forKey: .changeState) ?? .unchanged
+        sourceHealth = try container.decodeIfPresent(SourceHealthStatus.self, forKey: .sourceHealth) ?? .healthy
+        trace = try container.decodeIfPresent(DecisionTrace.self, forKey: .trace) ?? DecisionTrace()
+        metadata = try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(source, forKey: .source)
+        try container.encode(sourceIdentifier, forKey: .sourceIdentifier)
+        try container.encode(sourceType, forKey: .sourceType)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(notes, forKey: .notes)
+        try container.encodeIfPresent(startDate, forKey: .startDate)
+        try container.encodeIfPresent(endDate, forKey: .endDate)
+        try container.encode(isAllDay, forKey: .isAllDay)
+        try container.encodeIfPresent(location, forKey: .location)
+        try container.encode(owner, forKey: .owner)
+        try container.encode(relevantAudiences, forKey: .relevantAudiences)
+        try container.encodeIfPresent(calendarRole, forKey: .calendarRole)
+        try container.encode(lifeArea, forKey: .lifeArea)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(inclusion, forKey: .inclusion)
+        try container.encode(changeState, forKey: .changeState)
+        try container.encode(sourceHealth, forKey: .sourceHealth)
+        try container.encode(trace, forKey: .trace)
+        try container.encode(metadata, forKey: .metadata)
+    }
+
+    private static func legacyRelevantAudiences(from people: Set<PersonID>, owner: PersonID) -> Set<BriefingAudience> {
+        var audiences: Set<BriefingAudience> = []
+        if people.contains(.john) {
+            audiences.insert(.john)
+        }
+        if people.contains(.amy) {
+            audiences.insert(.amy)
+        }
+        if people.contains(.family) || people.contains(.ellie) || people.contains(.mia) {
+            audiences.formUnion(BriefingAudience.allCases)
+        }
+        return audiences.isEmpty ? owner.defaultRelevantAudiences : audiences
     }
 }
 
