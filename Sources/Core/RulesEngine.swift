@@ -127,6 +127,25 @@ public struct ReadyRoomRulesEngine: Sendable {
         return items.sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }
 
+    public func deduplicateDueSoonObligations(
+        _ obligations: [NormalizedItem],
+        against calendarItems: [NormalizedItem],
+        calendar: Calendar = .readyRoomGregorian
+    ) -> [NormalizedItem] {
+        let occupiedKeys = Set(
+            calendarItems.compactMap { item in
+                dedupeKey(for: item, calendar: calendar)
+            }
+        )
+
+        return obligations.filter { obligation in
+            guard let key = dedupeKey(for: obligation, calendar: calendar) else {
+                return true
+            }
+            return occupiedKeys.contains(key) == false
+        }
+    }
+
     public func detectConflicts(in items: [NormalizedItem]) -> [ConflictMarker] {
         let sorted = items
             .filter { $0.startDate != nil && $0.endDate != nil }
@@ -307,6 +326,30 @@ public struct ReadyRoomRulesEngine: Sendable {
         let startChanged = previous.startDate != event.startDate
         let endChanged = previous.endDate != event.endDate
         return (titleChanged || startChanged || endChanged) ? .changed : .unchanged
+    }
+
+    private func dedupeKey(for item: NormalizedItem, calendar: Calendar) -> String? {
+        guard item.isAllDay, let startDate = item.startDate else {
+            return nil
+        }
+
+        let normalizedTitle = normalizedDedupeTitle(for: item.title)
+        guard normalizedTitle.isEmpty == false else {
+            return nil
+        }
+
+        let day = startDate.startOfDay(in: calendar)
+        return "\(item.owner.rawValue)|\(Int(day.timeIntervalSince1970))|\(normalizedTitle)"
+    }
+
+    private func normalizedDedupeTitle(for title: String) -> String {
+        let lowered = title.lowercased()
+        let stripped = lowered.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+        }
+        return String(stripped)
+            .split(separator: " ")
+            .joined(separator: " ")
     }
 
     private func resolveOwner(

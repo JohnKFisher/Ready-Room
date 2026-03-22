@@ -849,8 +849,12 @@ final class ReadyRoomAppModel: ObservableObject {
             referenceDate: now,
             previousVisibleIDs: previousDueSoon
         )
+        let deduplicatedDueSoonItems = rulesEngine.deduplicateDueSoonObligations(
+            dueSoonItems,
+            against: calendarItems
+        )
         normalizedItems = calendarItems
-        dueSoon = dueSoonItems
+        dueSoon = deduplicatedDueSoonItems
         conflicts = rulesEngine.detectConflicts(in: calendarItems)
         lastSeenCalendarItems = ReadyRoomCollections.dictionaryLastValueWins(
             from: calendarItems.map { ($0.id, $0) }

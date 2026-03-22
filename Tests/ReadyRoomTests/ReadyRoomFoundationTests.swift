@@ -324,6 +324,79 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func dueSoonDedupesAgainstMatchingAllDayCalendarItemIgnoringTitleCase() {
+        let engine = ReadyRoomRulesEngine()
+        let calendar = Calendar.readyRoomGregorian
+        let day = calendar.date(from: DateComponents(year: 2026, month: 3, day: 16))!
+        let calendarItem = NormalizedItem(
+            id: "calendar:wfh",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "wfh",
+            sourceType: .calendar,
+            title: "John - Work from Home",
+            startDate: day,
+            endDate: day,
+            isAllDay: true,
+            owner: .john,
+            relevantAudiences: Set([.john, .amy])
+        )
+        let obligationItem = NormalizedItem(
+            id: "obligation:wfh",
+            source: SourceDescriptor(id: "obligations", displayName: "Obligations", type: .obligation),
+            sourceIdentifier: "wfh",
+            sourceType: .obligation,
+            title: "John - Work From Home",
+            startDate: day,
+            endDate: day,
+            isAllDay: true,
+            owner: .john,
+            relevantAudiences: Set([.john, .amy])
+        )
+
+        let deduplicated = engine.deduplicateDueSoonObligations([obligationItem], against: [calendarItem])
+
+        #expect(deduplicated.isEmpty)
+    }
+
+    @Test
+    func dueSoonKeepsDistinctItemWhenCalendarMatchIsTimed() {
+        let engine = ReadyRoomRulesEngine()
+        let calendar = Calendar.readyRoomGregorian
+        let start = calendar.date(from: DateComponents(year: 2026, month: 3, day: 16, hour: 9))!
+        let end = calendar.date(from: DateComponents(year: 2026, month: 3, day: 16, hour: 10))!
+        let allDay = calendar.date(from: DateComponents(year: 2026, month: 3, day: 16))!
+        let calendarItem = NormalizedItem(
+            id: "calendar:wfh-timed",
+            source: SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar),
+            sourceIdentifier: "wfh-timed",
+            sourceType: .calendar,
+            title: "John - Work from Home",
+            startDate: start,
+            endDate: end,
+            isAllDay: false,
+            owner: .john,
+            relevantAudiences: Set([.john, .amy])
+        )
+        let obligationItem = NormalizedItem(
+            id: "obligation:wfh-all-day",
+            source: SourceDescriptor(id: "obligations", displayName: "Obligations", type: .obligation),
+            sourceIdentifier: "wfh-all-day",
+            sourceType: .obligation,
+            title: "John - Work From Home",
+            startDate: allDay,
+            endDate: allDay,
+            isAllDay: true,
+            owner: .john,
+            relevantAudiences: Set([.john, .amy])
+        )
+
+        let deduplicated = engine.deduplicateDueSoonObligations([obligationItem], against: [calendarItem])
+
+        #expect(deduplicated.count == 1)
+        #expect(deduplicated[0].id == obligationItem.id)
+    }
+
+    @Test
     func obligationParserHandlesMonthlySentence() {
         let parser = PlainEnglishObligationParser()
         let parsed = parser.parse("Mortgage due every month on the 15th, remind me 7 and 3 days before")
