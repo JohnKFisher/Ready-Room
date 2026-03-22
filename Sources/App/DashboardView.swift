@@ -1,7 +1,181 @@
 import AppKit
 import SwiftUI
-import WebKit
 import ReadyRoomCore
+
+enum BeaconDashboardSlot: Int, CaseIterable, Sendable, Identifiable {
+    case centerTop
+    case centerMiddle
+    case rightRail
+    case centerBottom
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .centerTop: "Center Top"
+        case .centerMiddle: "Center Middle"
+        case .rightRail: "Right Rail"
+        case .centerBottom: "Center Bottom"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .centerTop: "Top"
+        case .centerMiddle: "Mid"
+        case .rightRail: "Right"
+        case .centerBottom: "Bottom"
+        }
+    }
+}
+
+struct BeaconDashboardSlotAssignment: Equatable, Identifiable {
+    let slot: BeaconDashboardSlot
+    let kind: DashboardCardKind
+
+    var id: BeaconDashboardSlot { slot }
+    var positionDescription: String { "\(slot.rawValue + 1). \(slot.label)" }
+}
+
+struct BeaconDashboardSlots: Equatable {
+    let orderedKinds: [DashboardCardKind]
+
+    init(cardOrder: [DashboardCardKind]) {
+        orderedKinds = Self.normalizedOrder(cardOrder)
+    }
+
+    static func normalizedOrder(_ cardOrder: [DashboardCardKind]) -> [DashboardCardKind] {
+        var seen: Set<DashboardCardKind> = []
+        var normalized: [DashboardCardKind] = []
+        normalized.reserveCapacity(DashboardCardKind.allCases.count)
+
+        for kind in cardOrder where seen.contains(kind) == false {
+            normalized.append(kind)
+            seen.insert(kind)
+        }
+
+        for kind in DashboardCardKind.allCases where seen.contains(kind) == false {
+            normalized.append(kind)
+            seen.insert(kind)
+        }
+
+        return Array(normalized.prefix(BeaconDashboardSlot.allCases.count))
+    }
+
+    var assignments: [BeaconDashboardSlotAssignment] {
+        BeaconDashboardSlot.allCases.enumerated().map { index, slot in
+            BeaconDashboardSlotAssignment(slot: slot, kind: orderedKinds[index])
+        }
+    }
+
+    var centerTop: DashboardCardKind { orderedKinds[0] }
+    var centerMiddle: DashboardCardKind { orderedKinds[1] }
+    var rightRail: DashboardCardKind { orderedKinds[2] }
+    var centerBottom: DashboardCardKind { orderedKinds[3] }
+
+    func index(of kind: DashboardCardKind) -> Int? {
+        orderedKinds.firstIndex(of: kind)
+    }
+
+    var slotSummaryText: String {
+        assignments
+            .map { "\($0.slot.shortLabel): \($0.kind.beaconDisplayTitle)" }
+            .joined(separator: "  •  ")
+    }
+}
+
+struct BeaconHeroWeatherDisplay: Equatable {
+    let symbolName: String
+    let headline: String
+    let detail: String
+    let locationText: String?
+    let noteText: String?
+}
+
+struct BeaconHeroDisplayContent: Equatable {
+    let summaryText: String
+    let weather: BeaconHeroWeatherDisplay
+
+    init(
+        summary: GeneratedNarrative?,
+        statusMessage: String,
+        weather: WeatherSnapshot?,
+        weatherHealthStatus: SourceHealthStatus?,
+        weatherMessage: String?,
+        resolvedLocation: String?
+    ) {
+        self.summaryText = Self.summaryText(summary: summary, statusMessage: statusMessage)
+        self.weather = Self.weatherDisplay(
+            weather: weather,
+            healthStatus: weatherHealthStatus,
+            sourceMessage: weatherMessage,
+            resolvedLocation: resolvedLocation
+        )
+    }
+
+    static func summaryText(summary: GeneratedNarrative?, statusMessage: String) -> String {
+        if let text = summary?.text.trimmedNonEmptyValue {
+            return text
+        }
+
+        let status = statusMessage.trimmedNonEmptyValue ?? "Ready"
+        return "Ready Room status: \(status)"
+    }
+
+    static func weatherDisplay(
+        weather: WeatherSnapshot?,
+        healthStatus: SourceHealthStatus?,
+        sourceMessage: String?,
+        resolvedLocation: String?
+    ) -> BeaconHeroWeatherDisplay {
+        let normalizedLocation = resolvedLocation?.trimmedNonEmptyValue
+        let normalizedSourceMessage = sourceMessage?.trimmedNonEmptyValue
+
+        if let weather {
+            return BeaconHeroWeatherDisplay(
+                symbolName: weather.symbolName ?? "cloud.fill",
+                headline: "\(weather.summary), \(Int(weather.currentTemperatureF))F",
+                detail: "High \(Int(weather.highF)) • Low \(Int(weather.lowF))",
+                locationText: normalizedLocation,
+                noteText: normalizedSourceMessage
+            )
+        }
+
+        return BeaconHeroWeatherDisplay(
+            symbolName: unavailableWeatherSymbolName(for: healthStatus),
+            headline: "Weather unavailable",
+            detail: unavailableWeatherDetail(status: healthStatus, sourceMessage: normalizedSourceMessage),
+            locationText: normalizedLocation,
+            noteText: nil
+        )
+    }
+
+    static func unavailableWeatherSymbolName(for status: SourceHealthStatus?) -> String {
+        switch status {
+        case .healthy, .stale:
+            "cloud.fill"
+        case .unavailable, .unconfigured, .unauthorized, .none:
+            "cloud.slash.fill"
+        }
+    }
+
+    private static func unavailableWeatherDetail(status: SourceHealthStatus?, sourceMessage: String?) -> String {
+        if let sourceMessage {
+            return sourceMessage
+        }
+
+        switch status {
+        case .unconfigured:
+            return "Set weather in Settings."
+        case .unauthorized:
+            return "Weather access is unavailable."
+        case .stale:
+            return "The latest weather data is stale."
+        case .healthy, .unavailable, .none:
+            return "Weather data is not available right now."
+        }
+    }
+}
 
 struct DashboardView: View {
     @ObservedObject var model: ReadyRoomAppModel
@@ -22,265 +196,454 @@ struct DashboardView: View {
         return DashboardTimelinePolicy.groupedSections(for: timelineItems, now: model.now, calendar: calendar)
     }
 
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-
-                HStack(alignment: .top, spacing: 20) {
-                    timelineColumn
-                    sideCards
-                        .frame(maxWidth: 360)
-                }
-
-                if model.compareDashboardModes {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Dashboard AI Compare")
-                            .font(.headline)
-                        ForEach(NarrativeGenerationMode.allCases, id: \.self) { mode in
-                            if let summary = model.dashboardSummaryByMode[mode] {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(mode.rawValue)
-                                        .font(.subheadline.weight(.semibold))
-                                    Text(summary.text)
-                                    Text("Preferred: \(summary.preferredMode.rawValue) • Actual: \(summary.actualMode.rawValue)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding()
-                                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(24)
-        }
-        .background(ReadyRoomPalette.windowBackground.ignoresSafeArea())
+    private var beaconSlots: BeaconDashboardSlots {
+        BeaconDashboardSlots(cardOrder: model.cardLayout.cardOrder)
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
+    private var preferredSummary: GeneratedNarrative? {
+        model.dashboardSummaryByMode[model.preferredMode] ?? model.dashboardSummaryByMode[.templated]
+    }
+
+    private var heroContent: BeaconHeroDisplayContent {
+        BeaconHeroDisplayContent(
+            summary: preferredSummary,
+            statusMessage: model.statusMessage,
+            weather: model.weather,
+            weatherHealthStatus: model.snapshot(for: .weather)?.health.resolvedStatus(at: model.now),
+            weatherMessage: model.placeholderLabel(for: .weather) ?? model.sourceMessage(for: .weather),
+            resolvedLocation: model.weatherSettings.resolvedDisplayName
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            beaconBackground
+                .ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    heroBand
+                    controlStrip
+
+                    if model.compareDashboardModes {
+                        compareModePanel
+                    }
+
+                    mainColumns
+                }
+                .padding(24)
+            }
+        }
+    }
+
+    private var beaconBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: [ReadyRoomPalette.backgroundTop, ReadyRoomPalette.backgroundMid, ReadyRoomPalette.backgroundBottom],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Circle()
+                .fill(ReadyRoomPalette.backgroundGlow.opacity(0.18))
+                .frame(width: 440, height: 440)
+                .blur(radius: 44)
+                .offset(x: -360, y: -220)
+
+            Circle()
+                .fill(ReadyRoomPalette.backgroundGlow.opacity(0.16))
+                .frame(width: 360, height: 260)
+                .blur(radius: 36)
+                .offset(x: 420, y: -260)
+        }
+    }
+
+    private var heroBand: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 14) {
                     Text("Ready Room")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(ReadyRoomPalette.primaryText)
+
                     Text(model.now.formattedMonthDayWeekday())
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 8) {
-                        Image(systemName: model.weather?.symbolName ?? weatherFallbackSymbolName)
-                            .foregroundStyle(model.weather == nil ? .secondary : .primary)
-                        Text(model.weather.map { "\($0.summary), \(Int($0.currentTemperatureF))F" } ?? "Weather unavailable")
-                            .font(.headline)
-                        if model.placeholderLabel(for: .weather) != nil {
-                            PlaceholderBadge(text: "Placeholder")
-                        }
-                    }
-                    if let weatherNote = model.placeholderLabel(for: .weather) ?? model.sourceMessage(for: .weather) {
-                        Text(weatherNote)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+                    Text(heroContent.summaryText)
+                        .font(.system(size: 27, weight: .semibold, design: .rounded))
+                        .foregroundStyle(ReadyRoomPalette.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 12) {
+                        Label(model.statusMessage, systemImage: "waveform.path.ecg")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+                        Text(AppRuntimeMetadata.displayString)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(ReadyRoomPalette.mutedText)
                     }
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
+
+                Spacer(minLength: 24)
+
+                VStack(alignment: .trailing, spacing: 14) {
                     Text(model.now.formattedClock())
-                        .font(.system(size: 32, weight: .semibold, design: .rounded))
-                    Text(model.statusMessage)
-                        .foregroundStyle(.secondary)
-                    Text(AppRuntimeMetadata.displayString)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 10) {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("Minimal Chrome")
-                                .font(.caption.weight(.semibold))
-                            Text("Hides the title bar for a cleaner wall display")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                        .font(.system(size: 60, weight: .bold, design: .rounded))
+                        .foregroundStyle(ReadyRoomPalette.primaryText)
+
+                    VStack(alignment: .trailing, spacing: 8) {
+                        HStack(spacing: 10) {
+                            Image(systemName: heroContent.weather.symbolName)
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(ReadyRoomPalette.primaryText)
+
+                            Text(heroContent.weather.headline)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(ReadyRoomPalette.primaryText)
+
+                            if model.placeholderLabel(for: .weather) != nil {
+                                PlaceholderBadge(text: "Placeholder")
+                            }
                         }
-                        Toggle("Minimal Window Chrome", isOn: $model.dashboardModeEnabled)
-                            .toggleStyle(.switch)
-                            .labelsHidden()
+
+                        Text(heroContent.weather.detail)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+                        if let locationText = heroContent.weather.locationText {
+                            Text(locationText)
+                                .font(.caption)
+                                .foregroundStyle(ReadyRoomPalette.mutedText)
+                        }
+
+                        if let noteText = heroContent.weather.noteText {
+                            Text(noteText)
+                                .font(.caption)
+                                .foregroundStyle(ReadyRoomPalette.mutedText)
+                                .multilineTextAlignment(.trailing)
+                        }
                     }
+                    .frame(maxWidth: 320, alignment: .trailing)
                 }
             }
 
-            if let summary = model.dashboardSummaryByMode[model.preferredMode] ?? model.dashboardSummaryByMode[.templated] {
-                Text(summary.text)
-                    .font(.body)
-                    .foregroundStyle(ReadyRoomPalette.primaryText)
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(ReadyRoomPalette.bannerSurface, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
-                    }
+            HStack(spacing: 12) {
+                BeaconStatusChip(label: "Sources", value: "\(model.sourceSnapshots.count)", systemImage: "antenna.radiowaves.left.and.right")
+                BeaconStatusChip(label: "Conflicts", value: "\(model.conflicts.count)", systemImage: "exclamationmark.triangle")
+                BeaconStatusChip(label: "Quiet Hours", value: model.quietHours.isActive(at: model.now) ? "On" : "Off", systemImage: "moon.zzz")
+                BeaconStatusChip(label: "Modules", value: "\(DashboardCardKind.allCases.count)", systemImage: "square.grid.3x2")
             }
+        }
+        .padding(24)
+        .beaconPanel(cornerRadius: 30, fill: ReadyRoomPalette.panelSurfaceElevated)
+    }
 
-            HStack(spacing: 18) {
-                Label("Sources: \(model.sourceSnapshots.count)", systemImage: "antenna.radiowaves.left.and.right")
-                Label("Conflicts: \(model.conflicts.count)", systemImage: "exclamationmark.triangle")
-                Label("Quiet Hours: \(model.quietHours.isActive(at: model.now) ? "On" : "Off")", systemImage: "moon.zzz")
-                Spacer()
+    private var controlStrip: some View {
+        HStack(alignment: .center, spacing: 16) {
+            HStack(spacing: 10) {
                 Toggle("Compare Modes", isOn: $model.compareDashboardModes)
                     .toggleStyle(.switch)
+                    .tint(ReadyRoomPalette.accent)
+
+                Divider()
+                    .frame(height: 18)
+                    .overlay(ReadyRoomPalette.cardBorder)
+
+                Toggle("Minimal Chrome", isOn: $model.dashboardModeEnabled)
+                    .toggleStyle(.switch)
+                    .tint(ReadyRoomPalette.accent)
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+            Spacer(minLength: 12)
+
+            Menu {
+                ForEach(beaconSlots.assignments) { assignment in
+                    Button("\(assignment.positionDescription): \(assignment.kind.beaconDisplayTitle)") {}
+                        .disabled(true)
+                }
+
+                Divider()
+
+                ForEach(Array(beaconSlots.orderedKinds.enumerated()), id: \.offset) { index, kind in
+                    Button("Move \(kind.beaconDisplayTitle) Earlier") {
+                        model.moveCard(kind, direction: -1)
+                    }
+                    .disabled(index == 0)
+
+                    Button("Move \(kind.beaconDisplayTitle) Later") {
+                        model.moveCard(kind, direction: 1)
+                    }
+                    .disabled(index == beaconSlots.orderedKinds.count - 1)
+
+                    if index != beaconSlots.orderedKinds.count - 1 {
+                        Divider()
+                    }
+                }
+            } label: {
+                Label("Arrange Modules", systemImage: "rectangle.3.group")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .menuStyle(.borderlessButton)
+
+            Text(beaconSlots.slotSummaryText)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(ReadyRoomPalette.mutedText)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .beaconPanel(cornerRadius: 22, fill: ReadyRoomPalette.controlStripSurface)
+    }
+
+    private var compareModePanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Dashboard AI Compare")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(ReadyRoomPalette.primaryText)
+
+            ForEach(NarrativeGenerationMode.allCases, id: \.self) { mode in
+                if let summary = model.dashboardSummaryByMode[mode] {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(mode.rawValue)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+                        Text(summary.text)
+                            .foregroundStyle(ReadyRoomPalette.primaryText)
+
+                        Text("Preferred: \(summary.preferredMode.rawValue) • Actual: \(summary.actualMode.rawValue)")
+                            .font(.caption)
+                            .foregroundStyle(ReadyRoomPalette.mutedText)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .beaconPanel(cornerRadius: 18, fill: ReadyRoomPalette.groupSurface)
+                }
+            }
+        }
+        .padding(20)
+        .beaconPanel(cornerRadius: 24, fill: ReadyRoomPalette.panelSurface)
+    }
+
+    private var mainColumns: some View {
+        HStack(alignment: .top, spacing: 18) {
+            timelineColumn
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            VStack(spacing: 18) {
+                moduleCard(for: beaconSlots.centerTop, minHeight: 188)
+                moduleCard(for: beaconSlots.centerMiddle, minHeight: 212)
+                moduleCard(for: beaconSlots.centerBottom, minHeight: 250)
+            }
+            .frame(width: 350)
+
+            moduleCard(for: beaconSlots.rightRail, minHeight: 720)
+                .frame(width: 340)
         }
     }
 
     private var timelineColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Text("Timeline")
-                        .font(.headline)
-                    if model.placeholderLabel(for: .calendar) != nil {
-                        PlaceholderBadge(text: "Placeholder")
-                    }
-                }
-                if let placeholderLabel = model.placeholderLabel(for: .calendar) {
-                    Text(placeholderLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(timelineSections) { section in
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(section.title)
-                            .font(.title3.weight(section.highlightsCurrentDay ? .bold : .semibold))
+            HStack(spacing: 8) {
+                Text("Timeline")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(ReadyRoomPalette.primaryText)
 
-                        ForEach(section.dayGroups) { dayGroup in
-                            VStack(alignment: .leading, spacing: 8) {
-                                if section.showsDaySubheaders {
-                                    Text(dayGroup.title)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                                timelineDayGroupContent(dayGroup)
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(ReadyRoomPalette.groupSurface, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
-                    }
+                if model.placeholderLabel(for: .calendar) != nil {
+                    PlaceholderBadge(text: "Placeholder")
                 }
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 
-    private var sideCards: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(model.cardLayout.cardOrder, id: \.self) { card in
-                SideCard(
-                    title: cardTitle(card),
-                    placeholderText: placeholderText(for: card),
-                    statusText: statusText(for: card),
-                    moveUp: { model.moveCard(card, direction: -1) },
-                    moveDown: { model.moveCard(card, direction: 1) }
-                ) {
-                    switch card {
-                    case .dueSoon:
-                        ForEach(model.dueSoon) { item in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Text(dueSoonDetail(for: item))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+            if let placeholderLabel = model.placeholderLabel(for: .calendar) {
+                Text(placeholderLabel)
+                    .font(.caption)
+                    .foregroundStyle(ReadyRoomPalette.mutedText)
+            }
+
+            ForEach(timelineSections) { section in
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(section.title)
+                        .font(.title3.weight(section.highlightsCurrentDay ? .bold : .semibold))
+                        .foregroundStyle(ReadyRoomPalette.primaryText)
+
+                    ForEach(section.dayGroups) { dayGroup in
+                        VStack(alignment: .leading, spacing: 8) {
+                            if section.showsDaySubheaders {
+                                Text(dayGroup.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(ReadyRoomPalette.secondaryText)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    case .weather:
-                        if let weather = model.weather {
-                            HStack(spacing: 8) {
-                                Image(systemName: weather.symbolName ?? weatherFallbackSymbolName)
-                                Text(weather.summary)
-                            }
-                            Text("Now \(Int(weather.currentTemperatureF))F • High \(Int(weather.highF)) • Low \(Int(weather.lowF))")
-                                .foregroundStyle(.secondary)
-                            if let resolvedDisplayName = model.weatherSettings.resolvedDisplayName {
-                                Text(resolvedDisplayName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else if statusText(for: .weather) == nil {
-                            Text(model.sourceMessage(for: .weather) ?? "Weather source unavailable.")
-                        }
-                    case .news:
-                        Text(model.dashboardNewsSummaryText)
-                        ForEach(model.headlines.prefix(2)) { headline in
-                            if let url = headline.url {
-                                Link(destination: url) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(headline.title)
-                                            .font(.subheadline.weight(.medium))
-                                            .multilineTextAlignment(.leading)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        Text(headline.sourceName)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            } else {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(headline.title)
-                                        .font(.subheadline.weight(.medium))
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    Text(headline.sourceName)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    case .media:
-                        ForEach(model.mediaItems.prefix(4)) { item in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(item.title)
-                                    if let subtitle = item.subtitle {
-                                        Text(subtitle).foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if let progress = item.progress {
-                                    Text("\(Int(progress * 100))%")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
+
+                            timelineDayGroupContent(dayGroup)
                         }
                     }
                 }
+                .padding(18)
+                .beaconPanel(cornerRadius: 22, fill: ReadyRoomPalette.groupSurface)
             }
         }
+        .padding(20)
+        .beaconPanel(cornerRadius: 26, fill: ReadyRoomPalette.panelSurface)
     }
 
-    private var weatherFallbackSymbolName: String {
-        switch model.snapshot(for: .weather)?.health.status {
-        case .healthy, .stale:
-            "cloud.fill"
-        case .unavailable, .unconfigured, .unauthorized:
-            "cloud.slash.fill"
-        case .none:
-            "cloud.fill"
+    private func moduleCard(for kind: DashboardCardKind, minHeight: CGFloat) -> some View {
+        BeaconModuleCard(
+            title: kind.beaconDisplayTitle,
+            placeholderText: placeholderText(for: kind),
+            statusText: statusText(for: kind)
+        ) {
+            beaconCardContent(for: kind)
         }
+        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
     }
 
-    private func cardTitle(_ kind: DashboardCardKind) -> String {
+    @ViewBuilder
+    private func beaconCardContent(for kind: DashboardCardKind) -> some View {
         switch kind {
-        case .dueSoon: "Due Soon"
-        case .weather: "Weather"
-        case .news: "News"
-        case .media: "Media"
+        case .dueSoon:
+            if model.dueSoon.isEmpty {
+                emptyModuleText("Nothing due soon.")
+            } else {
+                ForEach(model.dueSoon.prefix(4)) { item in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(ReadyRoomPalette.primaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text(dueSoonDetail(for: item))
+                            .font(.caption)
+                            .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+                        AudiencePillRow(accent: ItemAudienceAccentResolver.resolve(for: item, palette: model.personColorPaletteSettings), compact: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if item.id != model.dueSoon.prefix(4).last?.id {
+                        Divider()
+                            .overlay(ReadyRoomPalette.cardBorder)
+                    }
+                }
+            }
+        case .weather:
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: heroContent.weather.symbolName)
+                        .foregroundStyle(ReadyRoomPalette.primaryText)
+                    Text(heroContent.weather.headline)
+                        .font(.headline)
+                        .foregroundStyle(ReadyRoomPalette.primaryText)
+                }
+
+                Text(heroContent.weather.detail)
+                    .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+                if let locationText = heroContent.weather.locationText {
+                    Text(locationText)
+                        .font(.caption)
+                        .foregroundStyle(ReadyRoomPalette.mutedText)
+                }
+
+                if let noteText = heroContent.weather.noteText {
+                    Text(noteText)
+                        .font(.caption)
+                        .foregroundStyle(ReadyRoomPalette.mutedText)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case .news:
+            Text(model.dashboardNewsSummaryText)
+                .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+            if model.headlines.isEmpty {
+                emptyModuleText("No news items made the cut this morning.")
+            } else {
+                ForEach(model.headlines.prefix(3)) { headline in
+                    if let url = headline.url {
+                        Link(destination: url) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(headline.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(ReadyRoomPalette.primaryText)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Text(headline.sourceName)
+                                    .font(.caption)
+                                    .foregroundStyle(ReadyRoomPalette.mutedText)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(headline.title)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(ReadyRoomPalette.primaryText)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Text(headline.sourceName)
+                                .font(.caption)
+                                .foregroundStyle(ReadyRoomPalette.mutedText)
+                        }
+                    }
+
+                    if headline.id != model.headlines.prefix(3).last?.id {
+                        Divider()
+                            .overlay(ReadyRoomPalette.cardBorder)
+                    }
+                }
+            }
+        case .media:
+            if model.mediaItems.isEmpty {
+                emptyModuleText(model.sourceMessage(for: .media) ?? "Media source unavailable.")
+            } else {
+                ForEach(model.mediaItems.prefix(4)) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Circle()
+                            .fill(ReadyRoomPalette.accent.opacity(0.9))
+                            .frame(width: 8, height: 8)
+                            .padding(.top, 6)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .foregroundStyle(ReadyRoomPalette.primaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if let subtitle = item.subtitle {
+                                Text(subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(ReadyRoomPalette.secondaryText)
+                            }
+                        }
+
+                        if let progress = item.progress {
+                            Text("\(Int(progress * 100))%")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(ReadyRoomPalette.secondaryText)
+                        }
+                    }
+
+                    if item.id != model.mediaItems.prefix(4).last?.id {
+                        Divider()
+                            .overlay(ReadyRoomPalette.cardBorder)
+                    }
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private func emptyModuleText(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(ReadyRoomPalette.mutedText)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func placeholderText(for kind: DashboardCardKind) -> String? {
@@ -313,18 +676,19 @@ struct DashboardView: View {
     private func timelineDayGroupContent(_ dayGroup: DashboardTimelineDayGroup) -> some View {
         if !dayGroup.allDayItems.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                                Text("All Day")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                ForEach(dayGroup.allDayItems) { item in
-                                    TimelineItemView(item: item, now: model.now, palette: model.personColorPaletteSettings)
-                                }
-                            }
-                        }
+                Text("All Day")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ReadyRoomPalette.secondaryText)
 
-                        ForEach(dayGroup.scheduledItems) { item in
-                            TimelineItemView(item: item, now: model.now, palette: model.personColorPaletteSettings)
-                        }
+                ForEach(dayGroup.allDayItems) { item in
+                    TimelineItemView(item: item, now: model.now, palette: model.personColorPaletteSettings)
+                }
+            }
+        }
+
+        ForEach(dayGroup.scheduledItems) { item in
+            TimelineItemView(item: item, now: model.now, palette: model.personColorPaletteSettings)
+        }
     }
 
     private func dueSoonDetail(for item: NormalizedItem) -> String {
@@ -372,6 +736,36 @@ struct DashboardTimelinePlacement {
     let item: NormalizedItem
 }
 
+private struct BeaconStatusChip: View {
+    let label: String
+    let value: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(ReadyRoomPalette.secondaryText)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ReadyRoomPalette.mutedText)
+
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ReadyRoomPalette.primaryText)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(ReadyRoomPalette.badgeFill, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+        }
+    }
+}
+
 private struct TimelineItemView: View {
     let item: NormalizedItem
     let now: Date
@@ -382,38 +776,44 @@ private struct TimelineItemView: View {
         let accent = ItemAudienceAccentResolver.resolve(for: item, palette: palette)
         let isCompleted = DashboardTimelinePolicy.isCompleted(item, now: now)
         let statusText = timelineStatusText(isCompleted: isCompleted)
-        let detailText = item.notes?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyValue
+        let detailText = item.notes?.trimmedNonEmptyValue
 
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(item.isAllDay ? "All Day" : item.startDate?.formattedClock() ?? "TBD")
                     .font(.headline)
-                    .foregroundStyle(isCompleted ? .secondary : .primary)
+                    .foregroundStyle(isCompleted ? ReadyRoomPalette.mutedText : ReadyRoomPalette.primaryText)
+
                 Text(item.title)
                     .font(.headline)
-                    .foregroundStyle(isCompleted ? .secondary : .primary)
+                    .foregroundStyle(isCompleted ? ReadyRoomPalette.mutedText : ReadyRoomPalette.primaryText)
+
                 Spacer()
+
                 if let statusText {
                     TimelineStatusBadge(text: statusText, appearance: badgeAppearance(isCompleted: isCompleted))
                 }
             }
+
             Text(item.metadata["calendarTitle"] ?? item.source.displayName)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ReadyRoomPalette.secondaryText)
+
             HStack(alignment: .center, spacing: 10) {
                 AudiencePillRow(accent: accent, compact: true)
+
                 if let detailText {
                     Button {
                         showingDetails = true
                     } label: {
                         Label("Details", systemImage: "ellipsis.circle")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ReadyRoomPalette.secondaryText)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.07 : 0.10), in: Capsule())
+                            .background(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.12 : 0.16), in: Capsule())
                             .overlay {
                                 Capsule()
-                                    .stroke(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(0.18), lineWidth: 1)
+                                    .stroke(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(0.28), lineWidth: 1)
                             }
                     }
                     .buttonStyle(.plain)
@@ -428,9 +828,10 @@ private struct TimelineItemView: View {
                     .help("Show more details")
                 }
             }
+
             if let location = item.displayLocation {
                 Text(location)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ReadyRoomPalette.mutedText)
             }
         }
         .padding(.top, 14)
@@ -438,11 +839,11 @@ private struct TimelineItemView: View {
         .padding(.leading, 36)
         .padding(.trailing, 14)
         .background {
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(ReadyRoomPalette.itemSurface)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.05 : 0.08))
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(readyRoomHex: accent.primaryHex, fallback: .secondaryLabelColor).opacity(accent.isNeutralFallback ? 0.07 : 0.10))
                 }
         }
         .overlay(alignment: .leading) {
@@ -451,10 +852,10 @@ private struct TimelineItemView: View {
                 .padding(.vertical, 14)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
         }
-        .opacity(isCompleted ? 0.82 : 1)
+        .opacity(isCompleted ? 0.84 : 1)
     }
 
     private func timelineStatusText(isCompleted: Bool) -> String? {
@@ -501,15 +902,20 @@ private struct TimelineItemDetailPopover: View {
                 Circle()
                     .fill(Color(readyRoomHex: accentHex, fallback: .secondaryLabelColor))
                     .frame(width: 10, height: 10)
+
                 Text("More Details")
                     .font(.headline)
             }
+
             Text(title)
                 .font(.subheadline.weight(.semibold))
+
             Text(sourceName)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
             Divider()
+
             Text(detailText)
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
@@ -520,45 +926,38 @@ private struct TimelineItemDetailPopover: View {
     }
 }
 
-private struct SideCard<Content: View>: View {
+private struct BeaconModuleCard<Content: View>: View {
     let title: String
     let placeholderText: String?
     let statusText: String?
-    let moveUp: () -> Void
-    let moveDown: () -> Void
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
                 Text(title)
                     .font(.headline)
+                    .foregroundStyle(ReadyRoomPalette.primaryText)
+
                 if placeholderText != nil {
                     PlaceholderBadge(text: "Placeholder")
                 }
-                Spacer()
-                Button(action: moveUp) { Image(systemName: "arrow.up") }
-                    .buttonStyle(.borderless)
-                Button(action: moveDown) { Image(systemName: "arrow.down") }
-                    .buttonStyle(.borderless)
             }
+
             if let placeholderText {
                 Text(placeholderText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ReadyRoomPalette.mutedText)
             } else if let statusText {
                 Text(statusText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ReadyRoomPalette.mutedText)
             }
+
             content
         }
-        .padding()
-        .background(ReadyRoomPalette.panelSurface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
-        }
+        .padding(18)
+        .beaconPanel(cornerRadius: 24, fill: ReadyRoomPalette.panelSurface)
     }
 }
 
@@ -572,6 +971,10 @@ private struct PlaceholderBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(ReadyRoomPalette.badgeFill, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+            }
     }
 }
 
@@ -599,7 +1002,7 @@ private struct TimelineStatusBadge: View {
         case .changed, .cancelled:
             ReadyRoomPalette.badgeText
         case .complete:
-            Color(nsColor: .systemGreen)
+            ReadyRoomPalette.successText
         }
     }
 
@@ -608,9 +1011,9 @@ private struct TimelineStatusBadge: View {
         case .changed:
             ReadyRoomPalette.badgeFill
         case .cancelled:
-            Color(nsColor: .systemBlue).opacity(0.16)
+            ReadyRoomPalette.cancelBadgeFill
         case .complete:
-            Color(nsColor: .systemGreen).opacity(0.14)
+            ReadyRoomPalette.completeBadgeFill
         }
     }
 }
@@ -829,22 +1232,58 @@ enum DashboardTimelinePolicy {
     }
 }
 
+private extension DashboardCardKind {
+    var beaconDisplayTitle: String {
+        switch self {
+        case .dueSoon: "Due Soon"
+        case .weather: "Weather"
+        case .news: "News"
+        case .media: "Media"
+        }
+    }
+}
+
+private extension View {
+    func beaconPanel(cornerRadius: CGFloat = 24, fill: Color = ReadyRoomPalette.panelSurface) -> some View {
+        background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+            }
+            .shadow(color: ReadyRoomPalette.panelShadow, radius: 24, x: 0, y: 12)
+    }
+}
+
 private extension String {
-    var nonEmptyValue: String? {
-        isEmpty ? nil : self
+    var trimmedNonEmptyValue: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
 private enum ReadyRoomPalette {
-    static let windowBackground = Color(nsColor: .windowBackgroundColor)
-    static let panelSurface = Color(nsColor: .controlBackgroundColor)
-    static let groupSurface = Color(nsColor: .underPageBackgroundColor)
-    static let itemSurface = Color(nsColor: .textBackgroundColor)
-    static let bannerSurface = Color(nsColor: .controlBackgroundColor)
-    static let cardBorder = Color(nsColor: .separatorColor).opacity(0.35)
-    static let primaryText = Color(nsColor: .labelColor)
-    static let badgeFill = Color(nsColor: .controlAccentColor).opacity(0.16)
-    static let badgeText = Color(nsColor: .labelColor)
+    static let backgroundTop = Color(red: 0.05, green: 0.18, blue: 0.26)
+    static let backgroundMid = Color(red: 0.08, green: 0.35, blue: 0.45)
+    static let backgroundBottom = Color(red: 0.10, green: 0.49, blue: 0.58)
+    static let backgroundGlow = Color(red: 0.85, green: 0.98, blue: 1.00)
+
+    static let panelSurface = Color.white.opacity(0.10)
+    static let panelSurfaceElevated = Color.white.opacity(0.14)
+    static let controlStripSurface = Color.black.opacity(0.18)
+    static let groupSurface = Color.black.opacity(0.18)
+    static let itemSurface = Color.white.opacity(0.08)
+    static let cardBorder = Color.white.opacity(0.18)
+    static let panelShadow = Color.black.opacity(0.24)
+
+    static let primaryText = Color.white
+    static let secondaryText = Color(red: 0.79, green: 0.92, blue: 0.96)
+    static let mutedText = Color(red: 0.67, green: 0.83, blue: 0.88)
+    static let badgeFill = Color.white.opacity(0.12)
+    static let badgeText = Color.white
+    static let accent = Color(red: 0.60, green: 0.94, blue: 0.98)
+    static let successText = Color(red: 0.63, green: 0.97, blue: 0.78)
+    static let completeBadgeFill = Color(red: 0.63, green: 0.97, blue: 0.78).opacity(0.16)
+    static let cancelBadgeFill = Color(red: 0.62, green: 0.83, blue: 1.00).opacity(0.16)
 }
 
 struct DashboardWindowBridge: NSViewRepresentable {

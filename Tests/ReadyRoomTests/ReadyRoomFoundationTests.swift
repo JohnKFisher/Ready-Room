@@ -1805,6 +1805,57 @@ struct ReadyRoomFoundationTests {
         #expect(SharedObligationSyncGate.shouldReload(lastSeen: earlier, current: earlier, force: false) == false)
         #expect(SharedObligationSyncGate.shouldReload(lastSeen: nil, current: nil, force: true))
     }
+
+    @Test
+    func beaconDashboardSlotsKeepNewsInRightRailForLegacyDefaultOrder() {
+        let slots = BeaconDashboardSlots(cardOrder: DashboardCardKind.allCases)
+
+        #expect(slots.centerTop == .dueSoon)
+        #expect(slots.centerMiddle == .weather)
+        #expect(slots.rightRail == .news)
+        #expect(slots.centerBottom == .media)
+    }
+
+    @Test
+    func beaconDashboardSlotsMoveOccupantsWhenCardOrderChanges() {
+        let slots = BeaconDashboardSlots(cardOrder: [.dueSoon, .news, .weather, .media])
+
+        #expect(slots.centerTop == .dueSoon)
+        #expect(slots.centerMiddle == .news)
+        #expect(slots.rightRail == .weather)
+        #expect(slots.centerBottom == .media)
+    }
+
+    @Test
+    func beaconDashboardSlotsNormalizeDuplicatesAndMissingCards() {
+        let slots = BeaconDashboardSlots(cardOrder: [.news, .news, .dueSoon])
+
+        #expect(slots.orderedKinds.count == DashboardCardKind.allCases.count)
+        #expect(Set(slots.orderedKinds) == Set(DashboardCardKind.allCases))
+        #expect(slots.rightRail == .weather)
+        #expect(slots.centerBottom == .media)
+    }
+
+    @Test
+    func beaconHeroSummaryFallsBackToStatusMessage() {
+        let text = BeaconHeroDisplayContent.summaryText(summary: nil, statusMessage: "Refreshing sources...")
+
+        #expect(text == "Ready Room status: Refreshing sources...")
+    }
+
+    @Test
+    func beaconHeroWeatherDisplayUsesUnavailableStateWhenWeatherMissing() {
+        let display = BeaconHeroDisplayContent.weatherDisplay(
+            weather: nil,
+            healthStatus: .unavailable,
+            sourceMessage: "Weather request failed.",
+            resolvedLocation: nil
+        )
+
+        #expect(display.symbolName == "cloud.slash.fill")
+        #expect(display.headline == "Weather unavailable")
+        #expect(display.detail == "Weather request failed.")
+    }
 }
 
 private struct StubSenderAdapter: SenderAdapter {
