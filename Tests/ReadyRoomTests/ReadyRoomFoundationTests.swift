@@ -268,6 +268,79 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func duplicateAllDayCalendarCopiesMergeIntoOneNormalizedItem() {
+        let engine = ReadyRoomRulesEngine()
+        let calendar = Calendar.readyRoomGregorian
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let day = calendar.date(from: DateComponents(year: 2026, month: 3, day: 24))!
+        let nextDay = day.adding(days: 1, calendar: calendar)
+        let events = [
+            RawCalendarEvent(
+                id: "family-copy",
+                calendarIdentifier: "family",
+                calendarTitle: "Family Calendar",
+                title: "John - Work From Home",
+                notes: "WFH",
+                startDate: day,
+                endDate: nextDay,
+                isAllDay: true,
+                sourceOwnerHint: .john
+            ),
+            RawCalendarEvent(
+                id: "calendar-copy",
+                calendarIdentifier: "calendar",
+                calendarTitle: "Calendar",
+                title: "John - Work from Home",
+                startDate: day,
+                endDate: nextDay,
+                isAllDay: true,
+                sourceOwnerHint: .john
+            )
+        ]
+
+        let items = engine.normalizeCalendarEvents(events, source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 1)
+        #expect(items[0].isAllDay)
+        #expect(items[0].metadata["calendarTitle"] == "Calendar + Family Calendar")
+        #expect(items[0].metadata["calendarIdentifiers"] == "calendar\nfamily")
+        #expect(items[0].trace.appliedRules.contains(where: { $0.ruleID == "calendar.merge.duplicate-all-day-copy" }))
+    }
+
+    @Test
+    func timedCalendarCopiesWithMatchingTitlesRemainSeparate() {
+        let engine = ReadyRoomRulesEngine()
+        let calendar = Calendar.readyRoomGregorian
+        let source = SourceDescriptor(id: "calendar", displayName: "Calendars", type: .calendar)
+        let start = calendar.date(from: DateComponents(year: 2026, month: 3, day: 24, hour: 9, minute: 0))!
+        let end = start.addingTimeInterval(1800)
+        let events = [
+            RawCalendarEvent(
+                id: "family-copy",
+                calendarIdentifier: "family",
+                calendarTitle: "Family Calendar",
+                title: "John - Work from Home",
+                startDate: start,
+                endDate: end,
+                sourceOwnerHint: .john
+            ),
+            RawCalendarEvent(
+                id: "calendar-copy",
+                calendarIdentifier: "calendar",
+                calendarTitle: "Calendar",
+                title: "John - Work from Home",
+                startDate: start,
+                endDate: end,
+                sourceOwnerHint: .john
+            )
+        ]
+
+        let items = engine.normalizeCalendarEvents(events, source: source, configurations: [:], health: .healthy)
+
+        #expect(items.count == 2)
+    }
+
+    @Test
     func dueSoonObligationEntersReminderWindow() {
         let engine = ReadyRoomRulesEngine()
         let dueDate = Calendar.readyRoomGregorian.date(byAdding: .day, value: 2, to: Date())!

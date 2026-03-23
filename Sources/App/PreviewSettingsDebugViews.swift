@@ -590,10 +590,24 @@ private struct CalendarsSettingsView: View {
 
     private func previewItems(for calendar: CalendarDiscovery) -> [NormalizedItem] {
         model.normalizedItems
-            .filter { $0.metadata["calendarIdentifier"] == calendar.calendarIdentifier }
+            .filter { itemMatchesCalendar($0, calendarIdentifier: calendar.calendarIdentifier) }
             .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
             .prefix(4)
             .map { $0 }
+    }
+
+    private func itemMatchesCalendar(_ item: NormalizedItem, calendarIdentifier: String) -> Bool {
+        if item.metadata["calendarIdentifier"] == calendarIdentifier {
+            return true
+        }
+
+        guard let mergedIdentifiers = item.metadata["calendarIdentifiers"] else {
+            return false
+        }
+
+        return mergedIdentifiers
+            .split(separator: "\n")
+            .contains { $0 == calendarIdentifier }
     }
 
     private func previewTime(for item: NormalizedItem) -> String {

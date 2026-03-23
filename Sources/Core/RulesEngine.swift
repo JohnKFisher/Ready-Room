@@ -38,7 +38,8 @@ public struct ReadyRoomRulesEngine: Sendable {
         health: SourceHealthStatus,
         previousItems: [String: NormalizedItem] = [:]
     ) -> [NormalizedItem] {
-        events.map { event in
+        mergeDuplicateCalendarItems(
+            events.map { event in
             normalizeCalendarEvent(
                 event,
                 source: source,
@@ -47,9 +48,8 @@ public struct ReadyRoomRulesEngine: Sendable {
                 previousItems: previousItems
             )
         }
-        .sorted {
-            ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture)
-        }
+        )
+        .sorted(by: sortNormalizedCalendarItems)
     }
 
     public func dueSoonObligations(
@@ -326,6 +326,238 @@ public struct ReadyRoomRulesEngine: Sendable {
         let startChanged = previous.startDate != event.startDate
         let endChanged = previous.endDate != event.endDate
         return (titleChanged || startChanged || endChanged) ? .changed : .unchanged
+    }
+
+    private func mergeDuplicateCalendarItems(
+        _ items: [NormalizedItem],
+        calendar: Calendar = .readyRoomGregorian
+    ) -> [NormalizedItem] {
+        var groupedItems: [String: [NormalizedItem]] = [:]
+        var passthroughItems: [NormalizedItem] = []
+        passthroughItems.reserveCapacity(items.count)
+
+        for item in items {
+            guard let key = calendarDuplicateMergeKey(for: item, calendar: calendar) else {
+                passthroughItems.append(item)
+                continue
+            }
+            groupedItems[key, default: []].append(item)
+        }
+
+        let mergedItems = groupedItems.keys.sorted().map { key in
+            let group = groupedItems[key] ?? []
+            guard group.count > 1 else {
+                return group[0]
+            }
+            return mergeDuplicateCalendarGroup(group)
+        }
+
+        return passthroughItems + mergedItems
+    }
+
+    private func mergeDuplicateCalendarGroup(_ group: [NormalizedItem]) -> NormalizedItem {
+        let sortedGroup = group.sorted(by: preferredCalendarDuplicateItem)
+        let primary = sortedGroup[0]
+        let calendarTitles = mergedCalendarValues(
+            from: sortedGroup.compactMap { item in
+                item.metadata["calendarTitle"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        )
+        let calendarIdentifiers = mergedCalendarValues(
+            from: sortedGroup.compactMap { item in
+                item.metadata["calendarIdentifier"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        )
+
+        var merged = primary
+        merged.notes = sortedGroup.compactMap(\.notes).first(where: { note in
+            note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }) ?? primary.notes
+        merged.location = sortedGroup.compactMap(\.location).first(where: { location in
+            location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }) ?? primary.location
+        merged.relevantAudiences = Set(sortedGroup.flatMap(\.relevantAudiences))
+        merged.inclusion = InclusionFlags(
+            dashboard: sortedGroup.contains(where: { $0.inclusion.dashboard }),
+            johnBriefing: sortedGroup.contains(where: { $0.inclusion.johnBriefing }),
+            amyBriefing: sortedGroup.contains(where: { $0.inclusion.amyBriefing })
+        )
+        merged.confidence = sortedGroup.map(\.confidence).max() ?? primary.confidence
+        merged.changeState = mergedCalendarChangeState(for: sortedGroup)
+
+        var metadata = primary.metadata
+        if calendarTitles.isEmpty == false {
+            metadata["calendarTitle"] = mergedCalendarSourceLabel(
+                calendarTitles: calendarTitles,
+                calendarCount: max(calendarTitles.count, calendarIdentifiers.count)
+            )
+            metadata["calendarTitles"] = calendarTitles.joined(separator: "\n")
+        }
+        if calendarIdentifiers.isEmpty == false {
+            metadata["calendarIdentifiers"] = calendarIdentifiers.joined(separator: "\n")
+            metadata["mergedCalendarCount"] = String(calendarIdentifiers.count)
+        }
+        merged.metadata = metadata
+
+        merged.trace = DecisionTrace(
+            sourceFacts: primary.trace.sourceFacts + [
+                "Merged duplicate all-day calendar copies: \(mergedCalendarSourceLabel(calendarTitles: calendarTitles, calendarCount: max(calendarTitles.count, calendarIdentifiers.count)))"
+            ],
+            appliedRules: primary.trace.appliedRules + [
+                DecisionTraceEntry(
+                    ruleID: "calendar.merge.duplicate-all-day-copy",
+                    summary: "Merged duplicate all-day calendar copies",
+                    detail: "Collapsed \(sortedGroup.count) copies of the same all-day event across \(max(calendarTitles.count, calendarIdentifiers.count)) calendar(s)."
+                )
+            ],
+            overrides: primary.trace.overrides,
+            preferredGenerationMode: primary.trace.preferredGenerationMode,
+            actualGenerationMode: primary.trace.actualGenerationMode,
+            fallbackReason: primary.trace.fallbackReason
+        )
+
+        return merged
+    }
+
+    private func calendarDuplicateMergeKey(
+        for item: NormalizedItem,
+        calendar: Calendar
+    ) -> String? {
+        guard item.sourceType == .calendar, item.isAllDay, let startDate = item.startDate else {
+            return nil
+        }
+
+        let normalizedTitle = normalizedDedupeTitle(for: item.title)
+        guard normalizedTitle.isEmpty == false else {
+            return nil
+        }
+
+        let startDay = startDate.startOfDay(in: calendar)
+        let lastDay = lastCoveredDay(for: item, calendar: calendar) ?? startDay
+        return "\(item.owner.rawValue)|\(Int(startDay.timeIntervalSince1970))|\(Int(lastDay.timeIntervalSince1970))|\(normalizedTitle)"
+    }
+
+    private func lastCoveredDay(for item: NormalizedItem, calendar: Calendar) -> Date? {
+        guard let startDate = item.startDate else {
+            return nil
+        }
+
+        let startDay = startDate.startOfDay(in: calendar)
+        guard item.isAllDay, let endDate = item.endDate else {
+            return startDay
+        }
+
+        let endDay = endDate.startOfDay(in: calendar)
+        if endDay > startDay {
+            return endDay.adding(days: -1, calendar: calendar)
+        }
+        return startDay
+    }
+
+    private func mergedCalendarChangeState(for items: [NormalizedItem]) -> ChangeState {
+        let states = items.map(\.changeState)
+        if states.allSatisfy({ $0 == .cancelled }) {
+            return .cancelled
+        }
+        if states.contains(.unchanged) {
+            return .unchanged
+        }
+        if states.contains(.changed) {
+            return .changed
+        }
+        if states.contains(.new) {
+            return .new
+        }
+        return items[0].changeState
+    }
+
+    private func preferredCalendarDuplicateItem(_ lhs: NormalizedItem, _ rhs: NormalizedItem) -> Bool {
+        let lhsDashboardScore = lhs.inclusion.dashboard ? 1 : 0
+        let rhsDashboardScore = rhs.inclusion.dashboard ? 1 : 0
+        if lhsDashboardScore != rhsDashboardScore {
+            return lhsDashboardScore > rhsDashboardScore
+        }
+
+        if lhs.confidence != rhs.confidence {
+            return lhs.confidence > rhs.confidence
+        }
+
+        let lhsAudienceCount = lhs.relevantAudiences.count
+        let rhsAudienceCount = rhs.relevantAudiences.count
+        if lhsAudienceCount != rhsAudienceCount {
+            return lhsAudienceCount > rhsAudienceCount
+        }
+
+        let lhsNotesScore = lhs.notes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? 1 : 0
+        let rhsNotesScore = rhs.notes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? 1 : 0
+        if lhsNotesScore != rhsNotesScore {
+            return lhsNotesScore > rhsNotesScore
+        }
+
+        let lhsLocationScore = lhs.location?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? 1 : 0
+        let rhsLocationScore = rhs.location?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? 1 : 0
+        if lhsLocationScore != rhsLocationScore {
+            return lhsLocationScore > rhsLocationScore
+        }
+
+        return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
+    }
+
+    private func mergedCalendarValues(from rawValues: [String?]) -> [String] {
+        var uniqueValues: [String] = []
+        var seen: Set<String> = []
+
+        for rawValue in rawValues {
+            guard let rawValue else {
+                continue
+            }
+            let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty == false else {
+                continue
+            }
+            let normalized = trimmed.lowercased()
+            guard seen.contains(normalized) == false else {
+                continue
+            }
+            seen.insert(normalized)
+            uniqueValues.append(trimmed)
+        }
+
+        return uniqueValues.sorted {
+            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+    }
+
+    private func mergedCalendarSourceLabel(calendarTitles: [String], calendarCount: Int) -> String {
+        guard let firstTitle = calendarTitles.first else {
+            return "Calendars"
+        }
+
+        if calendarTitles.count == 1 {
+            guard calendarCount > 1 else {
+                return firstTitle
+            }
+            return "\(firstTitle) + \(calendarCount - 1) more"
+        }
+
+        if calendarTitles.count == 2 {
+            return calendarTitles.joined(separator: " + ")
+        }
+
+        return "\(firstTitle) + \(calendarTitles.count - 1) more"
+    }
+
+    private func sortNormalizedCalendarItems(_ lhs: NormalizedItem, _ rhs: NormalizedItem) -> Bool {
+        let lhsDate = lhs.startDate ?? .distantFuture
+        let rhsDate = rhs.startDate ?? .distantFuture
+        if lhsDate != rhsDate {
+            return lhsDate < rhsDate
+        }
+        let titleOrdering = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+        if titleOrdering != .orderedSame {
+            return titleOrdering == .orderedAscending
+        }
+        return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
     }
 
     private func dedupeKey(for item: NormalizedItem, calendar: Calendar) -> String? {
