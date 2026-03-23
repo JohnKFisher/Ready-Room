@@ -1635,9 +1635,12 @@ struct ReadyRoomFoundationTests {
 
         #expect(loaded.feeds.count == NewsSettings.starterFeeds.count)
         #expect(loaded.feeds.map(\.id) == NewsSettings.starterFeeds.map(\.id))
-        #expect(Set(loaded.baseProfile.includedFeedIDs) == Set(["reuters-us", "nj-com-news", "npr-news", "cbs-us"]))
-        #expect(loaded.feeds.first(where: { $0.id == "ap-top-news" })?.isEnabled == false)
-        #expect(loaded.feeds.first(where: { $0.id == "wwor-my9-new-jersey" })?.isEnabled == false)
+        #expect(Set(loaded.baseProfile.includedFeedIDs) == Set(["reuters-us", "abc-us", "wwor-my9-new-jersey", "nj-com-news", "npr-news", "cbs-us", "nj-spotlight-news"]))
+        #expect(loaded.feeds.contains(where: { $0.id == "ap-top-news" }) == false)
+        #expect(loaded.feeds.contains(where: { $0.id == "mycentraljersey" }) == false)
+        #expect(loaded.feeds.first(where: { $0.id == "abc-us" })?.storyLane == .national)
+        #expect(loaded.feeds.first(where: { $0.id == "wwor-my9-new-jersey" })?.isEnabled == true)
+        #expect(loaded.feeds.first(where: { $0.id == "nj-spotlight-news" })?.isEnabled == true)
         #expect(loaded.feeds.first(where: { $0.id == "wnyc-news" })?.storyLane == .regionalOverflow)
     }
 
@@ -1696,6 +1699,55 @@ struct ReadyRoomFoundationTests {
         #expect(normalized.johnOverride == nil)
         #expect(normalized.amyOverride == nil)
         #expect(Set(normalized.baseProfile.includedFeedIDs) == Set(normalized.feeds.filter(\.isEnabled).map(\.id)))
+    }
+
+    @Test
+    func newsSettingsMigrationReplacesMarch2026CuratedBundleAndKeepsManualFeeds() {
+        let manualFeed = ConfiguredNewsFeed(
+            id: "manual-town",
+            label: "Manual Town Feed",
+            feedURLString: "https://example.com/town.xml",
+            category: .local,
+            storyLane: .newJerseyLocal,
+            sourcePriority: 0.8,
+            isEnabled: true,
+            isUserAdded: true
+        )
+        let migrated = NewsSettings(
+            feeds: [
+                ConfiguredNewsFeed(id: "reuters-us", label: "Reuters U.S.", feedURLString: "https://feeds.reuters.com/Reuters/domesticNews", category: .general, storyLane: .national, sourcePriority: 1.3),
+                ConfiguredNewsFeed(id: "ap-top-news", label: "Associated Press", feedURLString: "", category: .general, storyLane: .national, sourcePriority: 1.25, isEnabled: false, statusNote: "disabled"),
+                ConfiguredNewsFeed(id: "wwor-my9-new-jersey", label: "WWOR / My9 New Jersey", feedURLString: "", category: .local, storyLane: .newJerseyLocal, sourcePriority: 1.0, isEnabled: false, statusNote: "disabled"),
+                ConfiguredNewsFeed(id: "nj-com-news", label: "NJ.com / Star-Ledger", feedURLString: "https://www.nj.com/arc/outboundfeeds/rss/category/news/?outputType=xml", category: .local, storyLane: .newJerseyLocal, sourcePriority: 1.0),
+                ConfiguredNewsFeed(id: "npr-news", label: "NPR News", feedURLString: "https://feeds.npr.org/1001/rss.xml", category: .general, storyLane: .national, sourcePriority: 1.0),
+                ConfiguredNewsFeed(id: "cbs-us", label: "CBS News U.S.", feedURLString: "https://www.cbsnews.com/latest/rss/us", category: .general, storyLane: .national, sourcePriority: 1.0),
+                ConfiguredNewsFeed(id: "wnyc-news", label: "WNYC", feedURLString: "https://feeds.wnyc.org/wnycnews/rss.xml", category: .local, storyLane: .regionalOverflow, sourcePriority: 0.65, isEnabled: false),
+                ConfiguredNewsFeed(id: "mycentraljersey", label: "MyCentralJersey", feedURLString: "", category: .local, storyLane: .newJerseyLocal, sourcePriority: 0.55, isEnabled: false, statusNote: "disabled"),
+                manualFeed
+            ],
+            baseProfile: NewsProfile(includedFeedIDs: ["reuters-us", "ap-top-news", "manual-town"], feedBoosts: ["ap-top-news": 0.2]),
+            dashboardOverride: NewsProfile(includedFeedIDs: ["manual-town"]),
+            johnOverride: NewsProfile(includedFeedIDs: ["ap-top-news"]),
+            amyOverride: NewsProfile(includedFeedIDs: ["mycentraljersey"])
+        )
+
+        #expect(migrated.feeds.map(\.id).prefix(NewsSettings.starterFeeds.count).elementsEqual(NewsSettings.starterFeeds.map(\.id)))
+        #expect(migrated.feeds.contains(where: { $0.id == manualFeed.id && $0.isUserAdded }))
+        #expect(migrated.feeds.contains(where: { $0.id == "ap-top-news" }) == false)
+        #expect(migrated.feeds.contains(where: { $0.id == "mycentraljersey" }) == false)
+        #expect(migrated.feeds.first(where: { $0.id == "abc-us" })?.isEnabled == true)
+        #expect(migrated.feeds.first(where: { $0.id == "abc-us" })?.storyLane == .national)
+        #expect(migrated.feeds.first(where: { $0.id == "wwor-my9-new-jersey" })?.label == "FOX 5 NY / My9 New Jersey")
+        #expect(migrated.feeds.first(where: { $0.id == "wwor-my9-new-jersey" })?.feedURLString == "https://www.fox5ny.com/rss/tags/us,nj")
+        #expect(migrated.feeds.first(where: { $0.id == "wwor-my9-new-jersey" })?.isEnabled == true)
+        #expect(migrated.feeds.first(where: { $0.id == "wwor-my9-new-jersey" })?.storyLane == .newJerseyLocal)
+        #expect(migrated.feeds.first(where: { $0.id == "nj-spotlight-news" })?.isEnabled == true)
+        #expect(migrated.feeds.first(where: { $0.id == "nj-spotlight-news" })?.storyLane == .newJerseyLocal)
+        #expect(migrated.feeds.first(where: { $0.id == "wnyc-news" })?.storyLane == .regionalOverflow)
+        #expect(migrated.dashboardOverride == nil)
+        #expect(migrated.johnOverride == nil)
+        #expect(migrated.amyOverride == nil)
+        #expect(Set(migrated.baseProfile.includedFeedIDs) == Set(migrated.feeds.filter(\.isEnabled).map(\.id)))
     }
 
     @Test

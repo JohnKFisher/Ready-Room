@@ -675,24 +675,20 @@ public struct NewsSettings: Codable, Sendable, Hashable {
             sourcePriority: 1.3
         ),
         ConfiguredNewsFeed(
-            id: "ap-top-news",
-            label: "Associated Press",
-            feedURLString: "",
+            id: "abc-us",
+            label: "ABC News U.S.",
+            feedURLString: "https://abcnews.com/abcnews/usheadlines",
             category: .general,
             storyLane: .national,
-            sourcePriority: 1.25,
-            isEnabled: false,
-            statusNote: "Ready Room could not confirm a clean official AP RSS feed URL, so this source is seeded but disabled."
+            sourcePriority: 1.25
         ),
         ConfiguredNewsFeed(
             id: "wwor-my9-new-jersey",
-            label: "WWOR / My9 New Jersey",
-            feedURLString: "",
+            label: "FOX 5 NY / My9 New Jersey",
+            feedURLString: "https://www.fox5ny.com/rss/tags/us,nj",
             category: .local,
             storyLane: .newJerseyLocal,
-            sourcePriority: 1.0,
-            isEnabled: false,
-            statusNote: "Ready Room could not confirm a clean official WWOR / My9 New Jersey RSS feed URL, so this source is seeded but disabled."
+            sourcePriority: 1.0
         ),
         ConfiguredNewsFeed(
             id: "nj-com-news",
@@ -728,14 +724,12 @@ public struct NewsSettings: Codable, Sendable, Hashable {
             isEnabled: false
         ),
         ConfiguredNewsFeed(
-            id: "mycentraljersey",
-            label: "MyCentralJersey",
-            feedURLString: "",
+            id: "nj-spotlight-news",
+            label: "NJ Spotlight News",
+            feedURLString: "https://www.njspotlightnews.org/feed/",
             category: .local,
             storyLane: .newJerseyLocal,
-            sourcePriority: 0.55,
-            isEnabled: false,
-            statusNote: "Ready Room could not confirm a clean official MyCentralJersey RSS feed URL, so this source is seeded but disabled."
+            sourcePriority: 0.55
         )
     ]
 
@@ -780,8 +774,23 @@ public struct NewsSettings: Codable, Sendable, Hashable {
             "guardian-us",
             "bbc-business"
         ])
+        let retiredCuratedIDs = Set([
+            "ap-top-news",
+            "mycentraljersey"
+        ])
+        let shouldReplaceMarch2026Bundle = existingCurated.contains { feed in
+            guard feed.id == "wwor-my9-new-jersey" else {
+                return false
+            }
+            return feed.trimmedFeedURLString.isEmpty
+                || feed.resolvedURL == nil
+                || feed.label == "WWOR / My9 New Jersey"
+                || feed.statusNote != nil
+        }
 
-        guard existingCuratedIDs.isDisjoint(with: legacyStarterIDs) == false else {
+        guard existingCuratedIDs.isDisjoint(with: legacyStarterIDs) == false
+            || existingCuratedIDs.isDisjoint(with: retiredCuratedIDs) == false
+            || shouldReplaceMarch2026Bundle else {
             return (feeds, false)
         }
 
