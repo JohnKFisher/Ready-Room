@@ -27,4 +27,10 @@ Once the app target is built, a local `.app` bundle can be created with:
 ./scripts/build_app.sh
 ```
 
-`build_app.sh` is the official versioned build path. It increments the app build number on every run and auto-advances the patch version unless you manually bump the major or minor version, in which case the patch resets to `0`.
+`build_app.sh` is the official packaging path. It uses the checked-in `VERSION` and `BUILD_NUMBER` metadata, generates a bundle-local `Info.plist`, and does not mutate tracked files during a normal build.
+
+If you intentionally want to change the tracked app version/build metadata, run:
+
+```bash
+./scripts/set_app_version.sh 0.2.16 36
+```
