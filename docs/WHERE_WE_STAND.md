@@ -33,7 +33,8 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - due-soon card shows remaining days
 - timeline items now show owner-based accent rails and pills for John, Amy, Ellie, Mia, and Family
 - placeholder data is clearly labeled in the dashboard and debug views when a source is still sample-backed
-- dashboard news now shows ranked live headlines from configured RSS/Atom feeds, with clickable article links that open in the default browser
+- dashboard hero weather stays compact while the weather module now shows richer today metrics plus a short `Today`/`Tonight`/`Tomorrow` strip
+- dashboard news now shows featured live headlines from configured RSS/Atom feeds, with clickable article links that open in the default browser
 
 ### Obligations
 - YAML-backed obligations storage
@@ -74,8 +75,8 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 ### Live Data Connectors
 - EventKit calendars are partly real and actively used
 - weather now has a real configuration screen and live data path
-- weather location resolves through Apple location search and current conditions come from Open-Meteo
-- news now has a real shared configuration screen, starter official feeds, optional manual local feeds, and deterministic per-surface ranking for dashboard/John/Amy
+- weather location resolves through Apple location search and current conditions plus short forecast data come from Open-Meteo
+- news now has a real shared configuration screen, a curated North Jersey / U.S. starter bundle, optional manual local feeds, and deterministic per-surface ranking for dashboard/John/Amy
 - news now refreshes on startup, manual refresh, scheduled-send prep, every 30 minutes for calendar/obligations, and every 60 minutes for news/weather while the app stays open
 - media is still mostly placeholder-driven in normal use
 - configuration UX for media is still mostly missing
@@ -101,8 +102,9 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - but logs, source test buttons, resend tools, and richer debug workflows are not there yet
 
 ### Dashboard Mode / Operational Polish
-- “minimal window chrome” exists
-- but the fuller kiosk-like dashboard mode from the plan is not built yet
+- direct toolbar access back to Dashboard now exists
+- the unfinished minimal window chrome toggle is gone
+- a fuller kiosk-like dashboard mode from the older plan is still not built
 - quiet hours exist conceptually and are surfaced, but the full operational behavior is still light
 
 ## Not Implemented Yet

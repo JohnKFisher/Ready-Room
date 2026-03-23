@@ -53,12 +53,12 @@ Implemented in this foundation pass:
 - `New or Changed` calendar state now uses a machine-local persisted baseline so previously seen events stay stable across app restarts instead of resetting to `new` on each relaunch
 - calendar location URLs for Zoom and Teams meetings now surface as friendly labels instead of dumping raw meeting links into the dashboard and briefings
 - due-soon obligations now suppress obviously duplicate all-day calendar items when owner, visible day, and normalized title match, avoiding duplicate dashboard/briefing rows from capitalization or punctuation-only differences
-- Weather now has a real shared configuration screen: it defaults to ZIP `08854`, resolves ZIP or city/state input through Apple location search, fetches live conditions from Open-Meteo, and shows an SF Symbol in the dashboard instead of sample placeholder weather
-- News now has a real shared configuration screen with a seeded starter bundle of official RSS/Atom feeds, optional manual local feeds, shared-base-plus-override profile controls for Dashboard/John/Amy, and an easy apply-base-to-all path
+- Weather now has a real shared configuration screen: it defaults to ZIP `08854`, resolves ZIP or city/state input through Apple location search, fetches live conditions from Open-Meteo, keeps the hero weather compact, and gives the dashboard weather card richer today-detail plus `Today`/`Tonight`/`Tomorrow` forecast context
+- News now has a real shared configuration screen with a seeded starter bundle centered on Reuters, New Jersey, and broader U.S. coverage, optional manual local feeds, story-lane metadata for national vs New Jersey vs regional-overflow selection, and shared-base-plus-override profile controls for Dashboard/John/Amy
 - live news refresh now fetches configured feeds on startup, manual refresh, pre-send refresh, and a bounded while-open cadence; failures surface as `stale` or `unavailable` while reusing the last good cached headlines instead of silently dropping back to sample content
-- news ranking is now deterministic and inspectable: feed priority, dedupe clustering, recency decay, and per-surface feed boosts produce separate ranked outputs for the dashboard, John's briefing, and Amy's briefing from one fetch pass
+- news ranking is now deterministic and inspectable: feed priority, dedupe clustering, recency decay, and per-surface feed boosts produce separate ranked outputs for the dashboard, John's briefing, and Amy's briefing from one fetch pass, and the dashboard now picks featured stories as national + New Jersey + best remaining when the day supports that mix
 - dashboard news headlines now open the real article URL in the default browser
-- the default Dashboard screen now uses a Beacon Wall layout with a large hero band, left timeline rail, slot-based module placement, and a compact controls strip for compare mode, minimal chrome, and module arrangement while still honoring the existing local card-order persistence
+- the default Dashboard screen now uses a Beacon Wall layout with a large hero band, left timeline rail, slot-based module placement, and a compact controls strip for compare mode and module arrangement while still honoring the existing local card-order persistence
 - `docs/WHERE_WE_STAND.md` now captures the current implemented/partial/missing status and should be regenerated on future major or minor version bumps
 
 Still open after this pass:
@@ -79,6 +79,7 @@ Still open after this pass:
 - 2026-03-13: `Yams` is the only new third-party dependency, used for obligations YAML.
 - 2026-03-13: AI provider order is Foundation Models -> Ollama -> no-AI templates, with deterministic fallback always available.
 - 2026-03-22: Beacon Wall becomes the default dashboard layout; advanced dashboard controls stay available in a compact strip instead of per-card chrome.
+- 2026-03-23: The unfinished minimal-chrome toggle is removed; dashboard weather stays lean in the hero but expands in-card; dashboard news defaults shift to a North Jersey / U.S. mix with featured national-plus-local selection.
 
 ## Risks And Follow-Ups
 
