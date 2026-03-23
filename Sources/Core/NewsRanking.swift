@@ -27,6 +27,7 @@ public struct DeterministicNewsRanker: Sendable {
         let clusters = cluster(filtered)
         let ranked = clusters.map { cluster in
             let representative = cluster.representative(profile: profile)
+            let storyLane = cluster.storyLane(profile: profile, feedMap: feedMap)
             let sourceNames = Array(Set(cluster.items.map(\.sourceName))).sorted()
             let clusterSizeBonus = log(Double(cluster.items.count) + 1) * 0.35
             let categoryBonus = Self.categoryBonus(for: representative.category)
@@ -55,6 +56,7 @@ public struct DeterministicNewsRanker: Sendable {
                 weight: score,
                 feedIdentifier: representative.feedIdentifier,
                 category: representative.category,
+                storyLane: storyLane,
                 sourcePriority: representative.sourcePriority,
                 rankingExplanation: explanation
             )
@@ -70,6 +72,36 @@ public struct DeterministicNewsRanker: Sendable {
             return Array(ranked.prefix(limit))
         }
         return ranked
+    }
+
+    public func featuredDashboardStories(from rankedHeadlines: [NewsHeadline], limit: Int = 3) -> [NewsHeadline] {
+        guard rankedHeadlines.isEmpty == false, limit > 0 else {
+            return []
+        }
+
+        var selected: [NewsHeadline] = []
+        var seenIDs: Set<String> = []
+
+        func appendFirst(matching predicate: (NewsHeadline) -> Bool) {
+            guard let headline = rankedHeadlines.first(where: { seenIDs.contains($0.id) == false && predicate($0) }) else {
+                return
+            }
+            selected.append(headline)
+            seenIDs.insert(headline.id)
+        }
+
+        appendFirst { $0.storyLane == .national }
+        appendFirst { $0.storyLane == .newJerseyLocal }
+
+        for headline in rankedHeadlines where seenIDs.contains(headline.id) == false {
+            selected.append(headline)
+            seenIDs.insert(headline.id)
+            if selected.count == limit {
+                break
+            }
+        }
+
+        return Array(selected.prefix(limit))
     }
 
     private func cluster(_ headlines: [NewsHeadline]) -> [NewsCluster] {
@@ -190,5 +222,24 @@ private struct NewsCluster {
             }
             return (lhs.publishedAt ?? .distantPast) < (rhs.publishedAt ?? .distantPast)
         } ?? items[0]
+    }
+
+    func storyLane(
+        profile: NewsProfile,
+        feedMap: [String: ConfiguredNewsFeed]
+    ) -> NewsStoryLane {
+        items.max { lhs, rhs in
+            let lhsBoost = lhs.feedIdentifier.map { profile.boost(for: $0) } ?? 0
+            let rhsBoost = rhs.feedIdentifier.map { profile.boost(for: $0) } ?? 0
+            let lhsScore = lhs.sourcePriority + lhsBoost
+            let rhsScore = rhs.sourcePriority + rhsBoost
+            if lhsScore != rhsScore {
+                return lhsScore < rhsScore
+            }
+            return (lhs.publishedAt ?? .distantPast) < (rhs.publishedAt ?? .distantPast)
+        }
+        .flatMap { headline in
+            headline.feedIdentifier.flatMap { feedMap[$0]?.storyLane }
+        } ?? .national
     }
 }

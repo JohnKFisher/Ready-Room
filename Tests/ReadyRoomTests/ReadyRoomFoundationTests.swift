@@ -1635,7 +1635,10 @@ struct ReadyRoomFoundationTests {
 
         #expect(loaded.feeds.count == NewsSettings.starterFeeds.count)
         #expect(loaded.feeds.map(\.id) == NewsSettings.starterFeeds.map(\.id))
-        #expect(Set(loaded.baseProfile.includedFeedIDs) == Set(loaded.feeds.filter(\.isEnabled).map(\.id)))
+        #expect(Set(loaded.baseProfile.includedFeedIDs) == Set(["reuters-us", "nj-com-news", "npr-news", "cbs-us"]))
+        #expect(loaded.feeds.first(where: { $0.id == "ap-top-news" })?.isEnabled == false)
+        #expect(loaded.feeds.first(where: { $0.id == "wwor-my9-new-jersey" })?.isEnabled == false)
+        #expect(loaded.feeds.first(where: { $0.id == "wnyc-news" })?.storyLane == .regionalOverflow)
     }
 
     @Test
@@ -1659,6 +1662,40 @@ struct ReadyRoomFoundationTests {
         #expect(normalized.effectiveProfile(for: .dashboard) == normalized.baseProfile.normalized(availableFeeds: normalized.feeds, includeNewFeedsByDefault: false))
         #expect(normalized.effectiveProfile(for: .john) == normalized.baseProfile.normalized(availableFeeds: normalized.feeds, includeNewFeedsByDefault: false))
         #expect(normalized.effectiveProfile(for: .amy) == normalized.baseProfile.normalized(availableFeeds: normalized.feeds, includeNewFeedsByDefault: false))
+    }
+
+    @Test
+    func newsSettingsMigrationReplacesLegacyCuratedFeedsAndKeepsManualFeeds() {
+        let manualFeed = ConfiguredNewsFeed(
+            id: "manual-town",
+            label: "Manual Town Feed",
+            feedURLString: "https://example.com/town.xml",
+            category: .local,
+            storyLane: .newJerseyLocal,
+            sourcePriority: 0.8,
+            isEnabled: true,
+            isUserAdded: true
+        )
+        let legacySettings = NewsSettings(
+            feeds: [
+                ConfiguredNewsFeed(id: "bbc-top-stories", label: "BBC Top Stories", feedURLString: "https://feeds.bbci.co.uk/news/rss.xml", category: .general, sourcePriority: 1.2),
+                ConfiguredNewsFeed(id: "guardian-world", label: "The Guardian World", feedURLString: "https://www.theguardian.com/world/rss", category: .world, sourcePriority: 1.1),
+                manualFeed
+            ],
+            baseProfile: NewsProfile(includedFeedIDs: ["bbc-top-stories", "guardian-world", "manual-town"], feedBoosts: ["bbc-top-stories": 0.2]),
+            dashboardOverride: NewsProfile(includedFeedIDs: ["manual-town"]),
+            johnOverride: NewsProfile(includedFeedIDs: ["guardian-world"]),
+            amyOverride: NewsProfile(includedFeedIDs: ["guardian-world"])
+        )
+
+        let normalized = legacySettings.normalized()
+
+        #expect(normalized.feeds.map(\.id).prefix(NewsSettings.starterFeeds.count).elementsEqual(NewsSettings.starterFeeds.map(\.id)))
+        #expect(normalized.feeds.contains(where: { $0.id == manualFeed.id && $0.isUserAdded }))
+        #expect(normalized.dashboardOverride == nil)
+        #expect(normalized.johnOverride == nil)
+        #expect(normalized.amyOverride == nil)
+        #expect(Set(normalized.baseProfile.includedFeedIDs) == Set(normalized.feeds.filter(\.isEnabled).map(\.id)))
     }
 
     @Test
@@ -1728,6 +1765,55 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func deterministicNewsRankerAssignsClusterLaneFromHighestPrioritySource() {
+        let settings = NewsSettings(
+            feeds: [
+                ConfiguredNewsFeed(id: "national", label: "National", feedURLString: "https://example.com/national.xml", category: .general, storyLane: .national, sourcePriority: 1.2),
+                ConfiguredNewsFeed(id: "local", label: "Local", feedURLString: "https://example.com/local.xml", category: .local, storyLane: .newJerseyLocal, sourcePriority: 0.9)
+            ]
+        )
+        let ranker = DeterministicNewsRanker()
+        let headlines = [
+            NewsHeadline(title: "State budget fight heads to deadline", sourceName: "National", publishedAt: .now, feedIdentifier: "national", category: .general, sourcePriority: 1.2),
+            NewsHeadline(title: "Budget fight heads to deadline in Trenton", sourceName: "Local", publishedAt: .now.addingTimeInterval(-60), feedIdentifier: "local", category: .local, sourcePriority: 0.9)
+        ]
+
+        let ranked = ranker.rank(headlines: headlines, settings: settings, surface: .dashboard)
+
+        #expect(ranked.count == 1)
+        #expect(ranked[0].storyLane == .national)
+    }
+
+    @Test
+    func featuredDashboardStoriesPreferNationalThenNewJerseyThenBestRemaining() {
+        let ranker = DeterministicNewsRanker()
+        let ranked = [
+            NewsHeadline(id: "national-1", title: "National lead", sourceName: "Reuters", publishedAt: .now, weight: 4.0, storyLane: .national),
+            NewsHeadline(id: "regional-1", title: "Regional spillover", sourceName: "WNYC", publishedAt: .now.addingTimeInterval(-60), weight: 3.8, storyLane: .regionalOverflow),
+            NewsHeadline(id: "local-1", title: "New Jersey lead", sourceName: "NJ.com", publishedAt: .now.addingTimeInterval(-120), weight: 3.5, storyLane: .newJerseyLocal),
+            NewsHeadline(id: "national-2", title: "National second", sourceName: "CBS", publishedAt: .now.addingTimeInterval(-180), weight: 3.1, storyLane: .national)
+        ]
+
+        let featured = ranker.featuredDashboardStories(from: ranked)
+
+        #expect(featured.map(\.id) == ["national-1", "local-1", "regional-1"])
+    }
+
+    @Test
+    func featuredDashboardStoriesFallBackGracefullyWhenNoLocalStoryExists() {
+        let ranker = DeterministicNewsRanker()
+        let ranked = [
+            NewsHeadline(id: "national-1", title: "National lead", sourceName: "Reuters", publishedAt: .now, weight: 4.0, storyLane: .national),
+            NewsHeadline(id: "regional-1", title: "Regional spillover", sourceName: "WNYC", publishedAt: .now.addingTimeInterval(-60), weight: 3.8, storyLane: .regionalOverflow),
+            NewsHeadline(id: "national-2", title: "National second", sourceName: "CBS", publishedAt: .now.addingTimeInterval(-120), weight: 3.1, storyLane: .national)
+        ]
+
+        let featured = ranker.featuredDashboardStories(from: ranked)
+
+        #expect(featured.map(\.id) == ["national-1", "regional-1", "national-2"])
+    }
+
+    @Test
     func manualLocalFeedOnlyInfluencesSelectedProfile() {
         let feeds = [
             ConfiguredNewsFeed(id: "global", label: "Global", feedURLString: "https://example.com/global.xml", category: .general, sourcePriority: 1.0),
@@ -1770,6 +1856,78 @@ struct ReadyRoomFoundationTests {
         #expect(unconfigured.placeholderLabel == nil)
         #expect(unavailable.health.status == .unavailable)
         #expect(unavailable.health.message == "Weather request failed.")
+    }
+
+    @Test
+    func openMeteoWeatherConnectorBuildsRichSnapshotAndForecastPeriods() async throws {
+        let calendar = Calendar.readyRoomGregorian
+        let now = Date()
+        let startOfDay = now.startOfDay(in: calendar)
+        defer { StubURLProtocol.requestHandler = nil }
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
+
+        let today = startOfDay
+        let tomorrow = today.adding(days: 1, calendar: calendar)
+        let dayAfterTomorrow = today.adding(days: 2, calendar: calendar)
+        let hourlyMoments = [
+            today.addingTimeInterval(18 * 3600),
+            today.addingTimeInterval(21 * 3600),
+            tomorrow,
+            tomorrow.addingTimeInterval(3 * 3600),
+            tomorrow.addingTimeInterval(6 * 3600)
+        ]
+
+        StubURLProtocol.requestHandler = { request in
+            guard let url = request.url else {
+                throw NSError(domain: "ReadyRoomTests", code: 1)
+            }
+            let payload = """
+            {
+              "current": {
+                "time": "\(timeFormatter.string(from: now))",
+                "temperature_2m": 61.0,
+                "weather_code": 2,
+                "wind_speed_10m": 12.0,
+                "precipitation_probability": 35.0
+              },
+              "hourly": {
+                "time": [\(hourlyMoments.map { "\"\(timeFormatter.string(from: $0))\"" }.joined(separator: ", "))],
+                "temperature_2m": [55.0, 52.0, 49.0, 47.0, 46.0],
+                "weather_code": [3, 61, 61, 45, 1]
+              },
+              "daily": {
+                "time": ["\(dateFormatter.string(from: today))", "\(dateFormatter.string(from: tomorrow))", "\(dateFormatter.string(from: dayAfterTomorrow))"],
+                "weather_code": [2, 61, 0],
+                "temperature_2m_max": [68.0, 63.0, 70.0],
+                "temperature_2m_min": [45.0, 48.0, 50.0],
+                "precipitation_probability_max": [40.0, 70.0, 5.0],
+                "wind_speed_10m_max": [14.0, 16.0, 9.0]
+              }
+            }
+            """
+            let response = try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
+            return (response, Data(payload.utf8))
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let connector = OpenMeteoWeatherConnector(
+            configuration: OpenMeteoConfiguration(latitude: 40.5541, longitude: -74.4643),
+            session: session
+        )
+
+        let snapshot = try await connector.refresh()
+        let weather = try #require(snapshot.weather)
+
+        #expect(weather.precipitationChancePercent == 40.0)
+        #expect(weather.windSpeedMPH == 12.0)
+        #expect(weather.forecastPeriods.map(\.label) == ["Today", "Tonight", "Tomorrow"])
     }
 
     @Test
@@ -1888,4 +2046,34 @@ private struct StubSenderAdapter: SenderAdapter {
         )
         return SendExecutionResult(record: record, messageID: "\(id)-message")
     }
+}
+
+private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: NSError(domain: "StubURLProtocol", code: 1))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

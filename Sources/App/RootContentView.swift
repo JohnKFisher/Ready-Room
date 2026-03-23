@@ -43,12 +43,14 @@ struct RootContentView: View {
                     DebugView(model: model)
                 }
             }
-            .background(DashboardWindowBridge(enabled: model.dashboardModeEnabled))
         }
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
                 Button("Refresh") {
                     Task { await model.refresh() }
+                }
+                Button("Dashboard") {
+                    model.selectedScreen = .dashboard
                 }
                 Button("Briefing") {
                     model.selectedScreen = .preview

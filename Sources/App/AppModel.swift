@@ -66,7 +66,6 @@ final class ReadyRoomAppModel: ObservableObject {
     @Published var showSendChooser = false
     @Published var compareBriefingModes = false
     @Published var compareDashboardModes = false
-    @Published var dashboardModeEnabled = false
     @Published var preferredMode: NarrativeGenerationMode = .foundationModels
     @Published var machineIdentifier = ""
     @Published var senderSettings = SenderSettings()
@@ -677,8 +676,8 @@ final class ReadyRoomAppModel: ObservableObject {
                 problems.append("Every news feed needs a label.")
                 break
             }
-            if feed.resolvedURL == nil {
-                problems.append("Every news feed needs a valid http or https URL.")
+            if feed.isEnabled, feed.resolvedURL == nil {
+                problems.append(feed.statusNote ?? "Every enabled news feed needs a valid official http or https RSS/Atom URL.")
                 break
             }
         }
@@ -819,11 +818,12 @@ final class ReadyRoomAppModel: ObservableObject {
 
         weather = weatherSnapshot?.weather
         let rawNewsHeadlines = newsSnapshot?.headlines ?? []
-        headlines = newsRanker.rank(
+        let rankedDashboardHeadlines = newsRanker.rank(
             headlines: rawNewsHeadlines,
             settings: newsSettings,
             surface: .dashboard
         )
+        headlines = newsRanker.featuredDashboardStories(from: rankedDashboardHeadlines)
         rankedHeadlinesByAudience = [
             .john: newsRanker.rank(headlines: rawNewsHeadlines, settings: newsSettings, surface: .john),
             .amy: newsRanker.rank(headlines: rawNewsHeadlines, settings: newsSettings, surface: .amy)

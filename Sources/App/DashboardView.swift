@@ -342,19 +342,9 @@ struct DashboardView: View {
 
     private var controlStrip: some View {
         HStack(alignment: .center, spacing: 16) {
-            HStack(spacing: 10) {
-                Toggle("Compare Modes", isOn: $model.compareDashboardModes)
-                    .toggleStyle(.switch)
-                    .tint(ReadyRoomPalette.accent)
-
-                Divider()
-                    .frame(height: 18)
-                    .overlay(ReadyRoomPalette.cardBorder)
-
-                Toggle("Minimal Chrome", isOn: $model.dashboardModeEnabled)
-                    .toggleStyle(.switch)
-                    .tint(ReadyRoomPalette.accent)
-            }
+            Toggle("Compare Modes", isOn: $model.compareDashboardModes)
+                .toggleStyle(.switch)
+                .tint(ReadyRoomPalette.accent)
             .font(.subheadline.weight(.medium))
             .foregroundStyle(ReadyRoomPalette.secondaryText)
 
@@ -531,17 +521,31 @@ struct DashboardView: View {
                 }
             }
         case .weather:
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(systemName: heroContent.weather.symbolName)
-                        .foregroundStyle(ReadyRoomPalette.primaryText)
-                    Text(heroContent.weather.headline)
-                        .font(.headline)
-                        .foregroundStyle(ReadyRoomPalette.primaryText)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(heroContent.weather.headline, systemImage: heroContent.weather.symbolName)
+                            .font(.headline)
+                            .foregroundStyle(ReadyRoomPalette.primaryText)
+
+                        Text(heroContent.weather.detail)
+                            .foregroundStyle(ReadyRoomPalette.secondaryText)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    if let currentTemperature = model.weather?.currentTemperatureF {
+                        Text("\(Int(currentTemperature.rounded()))°")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(ReadyRoomPalette.primaryText)
+                    }
                 }
 
-                Text(heroContent.weather.detail)
-                    .foregroundStyle(ReadyRoomPalette.secondaryText)
+                HStack(spacing: 10) {
+                    WeatherMetricBadge(label: "Rain", value: weatherPrecipitationText)
+                    WeatherMetricBadge(label: "Wind", value: weatherWindText)
+                    WeatherMetricBadge(label: "Updated", value: weatherUpdatedText)
+                }
 
                 if let locationText = heroContent.weather.locationText {
                     Text(locationText)
@@ -553,6 +557,17 @@ struct DashboardView: View {
                     Text(noteText)
                         .font(.caption)
                         .foregroundStyle(ReadyRoomPalette.mutedText)
+                }
+
+                if weatherForecastPeriods.isEmpty == false {
+                    Divider()
+                        .overlay(ReadyRoomPalette.cardBorder)
+
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(weatherForecastPeriods) { period in
+                            WeatherForecastPeriodView(period: period)
+                        }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -670,6 +685,31 @@ struct DashboardView: View {
         case .media:
             model.placeholderLabel(for: .media) == nil ? model.sourceMessage(for: .media) : nil
         }
+    }
+
+    private var weatherForecastPeriods: [WeatherForecastPeriod] {
+        Array((model.weather?.forecastPeriods ?? []).prefix(3))
+    }
+
+    private var weatherPrecipitationText: String {
+        guard let chance = model.weather?.precipitationChancePercent else {
+            return "--"
+        }
+        return "\(Int(chance.rounded()))%"
+    }
+
+    private var weatherWindText: String {
+        guard let wind = model.weather?.windSpeedMPH else {
+            return "--"
+        }
+        return "\(Int(wind.rounded())) mph"
+    }
+
+    private var weatherUpdatedText: String {
+        guard let fetchedAt = model.weather?.fetchedAt else {
+            return "--"
+        }
+        return fetchedAt.formatted(date: .omitted, time: .shortened)
     }
 
     @ViewBuilder
@@ -958,6 +998,76 @@ private struct BeaconModuleCard<Content: View>: View {
         }
         .padding(18)
         .beaconPanel(cornerRadius: 24, fill: ReadyRoomPalette.panelSurface)
+    }
+}
+
+private struct WeatherMetricBadge: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(ReadyRoomPalette.mutedText)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ReadyRoomPalette.primaryText)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(ReadyRoomPalette.badgeFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+        }
+    }
+}
+
+private struct WeatherForecastPeriodView: View {
+    let period: WeatherForecastPeriod
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                if let symbolName = period.symbolName {
+                    Image(systemName: symbolName)
+                        .foregroundStyle(ReadyRoomPalette.primaryText)
+                }
+                Text(period.label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ReadyRoomPalette.secondaryText)
+            }
+
+            Text(period.summary)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ReadyRoomPalette.primaryText)
+                .lineLimit(2)
+
+            Text(temperatureText)
+                .font(.caption)
+                .foregroundStyle(ReadyRoomPalette.mutedText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(ReadyRoomPalette.groupSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(ReadyRoomPalette.cardBorder, lineWidth: 1)
+        }
+    }
+
+    private var temperatureText: String {
+        switch (period.highF, period.lowF) {
+        case let (high?, low?):
+            return "High \(Int(high.rounded())) • Low \(Int(low.rounded()))"
+        case let (high?, nil):
+            return "High \(Int(high.rounded()))"
+        case let (nil, low?):
+            return "Low \(Int(low.rounded()))"
+        case (nil, nil):
+            return "Temps unavailable"
+        }
     }
 }
 
@@ -1284,29 +1394,4 @@ private enum ReadyRoomPalette {
     static let successText = Color(red: 0.63, green: 0.97, blue: 0.78)
     static let completeBadgeFill = Color(red: 0.63, green: 0.97, blue: 0.78).opacity(0.16)
     static let cancelBadgeFill = Color(red: 0.62, green: 0.83, blue: 1.00).opacity(0.16)
-}
-
-struct DashboardWindowBridge: NSViewRepresentable {
-    let enabled: Bool
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            apply(to: view.window)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            apply(to: nsView.window)
-        }
-    }
-
-    private func apply(to window: NSWindow?) {
-        guard let window else { return }
-        window.titleVisibility = enabled ? .hidden : .visible
-        window.titlebarAppearsTransparent = enabled
-        window.isMovableByWindowBackground = enabled
-    }
 }

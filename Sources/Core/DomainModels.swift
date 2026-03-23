@@ -412,6 +412,9 @@ public struct WeatherSnapshot: Codable, Sendable, Hashable {
     public var currentTemperatureF: Double
     public var highF: Double
     public var lowF: Double
+    public var precipitationChancePercent: Double?
+    public var windSpeedMPH: Double?
+    public var forecastPeriods: [WeatherForecastPeriod]
     public var fetchedAt: Date
 
     public init(
@@ -420,6 +423,9 @@ public struct WeatherSnapshot: Codable, Sendable, Hashable {
         currentTemperatureF: Double,
         highF: Double,
         lowF: Double,
+        precipitationChancePercent: Double? = nil,
+        windSpeedMPH: Double? = nil,
+        forecastPeriods: [WeatherForecastPeriod] = [],
         fetchedAt: Date = .now
     ) {
         self.summary = summary
@@ -427,7 +433,35 @@ public struct WeatherSnapshot: Codable, Sendable, Hashable {
         self.currentTemperatureF = currentTemperatureF
         self.highF = highF
         self.lowF = lowF
+        self.precipitationChancePercent = precipitationChancePercent
+        self.windSpeedMPH = windSpeedMPH
+        self.forecastPeriods = forecastPeriods
         self.fetchedAt = fetchedAt
+    }
+}
+
+public struct WeatherForecastPeriod: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var label: String
+    public var summary: String
+    public var symbolName: String?
+    public var highF: Double?
+    public var lowF: Double?
+
+    public init(
+        id: String,
+        label: String,
+        summary: String,
+        symbolName: String? = nil,
+        highF: Double? = nil,
+        lowF: Double? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.summary = summary
+        self.symbolName = symbolName
+        self.highF = highF
+        self.lowF = lowF
     }
 }
 
@@ -493,31 +527,54 @@ public enum NewsCategory: String, Codable, CaseIterable, Sendable, Hashable {
     }
 }
 
+public enum NewsStoryLane: String, Codable, CaseIterable, Sendable, Hashable {
+    case national
+    case newJerseyLocal
+    case regionalOverflow
+
+    public var displayName: String {
+        switch self {
+        case .national:
+            "National"
+        case .newJerseyLocal:
+            "New Jersey"
+        case .regionalOverflow:
+            "Regional"
+        }
+    }
+}
+
 public struct ConfiguredNewsFeed: Codable, Sendable, Hashable, Identifiable {
     public var id: String
     public var label: String
     public var feedURLString: String
     public var category: NewsCategory
+    public var storyLane: NewsStoryLane
     public var sourcePriority: Double
     public var isEnabled: Bool
     public var isUserAdded: Bool
+    public var statusNote: String?
 
     public init(
         id: String = UUID().uuidString,
         label: String,
         feedURLString: String,
         category: NewsCategory,
+        storyLane: NewsStoryLane = .national,
         sourcePriority: Double = 1.0,
         isEnabled: Bool = true,
-        isUserAdded: Bool = false
+        isUserAdded: Bool = false,
+        statusNote: String? = nil
     ) {
         self.id = id
         self.label = label
         self.feedURLString = feedURLString
         self.category = category
+        self.storyLane = storyLane
         self.sourcePriority = sourcePriority
         self.isEnabled = isEnabled
         self.isUserAdded = isUserAdded
+        self.statusNote = statusNote
     }
 
     public var trimmedLabel: String {
@@ -596,44 +653,89 @@ public struct NewsSettings: Codable, Sendable, Hashable {
         johnOverride: NewsProfile? = nil,
         amyOverride: NewsProfile? = nil
     ) {
-        let normalizedFeeds = feeds
+        let migration = Self.migratingCuratedFeedsIfNeeded(from: feeds)
+        let normalizedFeeds = migration.feeds
         self.feeds = normalizedFeeds
         let shouldAutoIncludeNewFeeds = baseProfile == nil
-        self.baseProfile = (baseProfile ?? NewsProfile.default(for: normalizedFeeds))
+        let resolvedBaseProfile = migration.didMigrate ? NewsProfile.default(for: normalizedFeeds) : (baseProfile ?? NewsProfile.default(for: normalizedFeeds))
+        self.baseProfile = resolvedBaseProfile
             .normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: shouldAutoIncludeNewFeeds)
-        self.dashboardOverride = dashboardOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
-        self.johnOverride = johnOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
-        self.amyOverride = amyOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
+        self.dashboardOverride = migration.didMigrate ? nil : dashboardOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
+        self.johnOverride = migration.didMigrate ? nil : johnOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
+        self.amyOverride = migration.didMigrate ? nil : amyOverride?.normalized(availableFeeds: normalizedFeeds, includeNewFeedsByDefault: false)
     }
 
     public static let starterFeeds: [ConfiguredNewsFeed] = [
         ConfiguredNewsFeed(
-            id: "bbc-top-stories",
-            label: "BBC Top Stories",
-            feedURLString: "https://feeds.bbci.co.uk/news/rss.xml",
+            id: "reuters-us",
+            label: "Reuters U.S.",
+            feedURLString: "https://feeds.reuters.com/Reuters/domesticNews",
             category: .general,
-            sourcePriority: 1.2
+            storyLane: .national,
+            sourcePriority: 1.3
         ),
         ConfiguredNewsFeed(
-            id: "guardian-world",
-            label: "The Guardian World",
-            feedURLString: "https://www.theguardian.com/world/rss",
-            category: .world,
-            sourcePriority: 1.1
+            id: "ap-top-news",
+            label: "Associated Press",
+            feedURLString: "",
+            category: .general,
+            storyLane: .national,
+            sourcePriority: 1.25,
+            isEnabled: false,
+            statusNote: "Ready Room could not confirm a clean official AP RSS feed URL, so this source is seeded but disabled."
         ),
         ConfiguredNewsFeed(
-            id: "guardian-us",
-            label: "The Guardian US",
-            feedURLString: "https://www.theguardian.com/us-news/rss",
-            category: .general,
+            id: "wwor-my9-new-jersey",
+            label: "WWOR / My9 New Jersey",
+            feedURLString: "",
+            category: .local,
+            storyLane: .newJerseyLocal,
+            sourcePriority: 1.0,
+            isEnabled: false,
+            statusNote: "Ready Room could not confirm a clean official WWOR / My9 New Jersey RSS feed URL, so this source is seeded but disabled."
+        ),
+        ConfiguredNewsFeed(
+            id: "nj-com-news",
+            label: "NJ.com / Star-Ledger",
+            feedURLString: "https://www.nj.com/arc/outboundfeeds/rss/category/news/?outputType=xml",
+            category: .local,
+            storyLane: .newJerseyLocal,
             sourcePriority: 1.0
         ),
         ConfiguredNewsFeed(
-            id: "bbc-business",
-            label: "BBC Business",
-            feedURLString: "https://feeds.bbci.co.uk/news/business/rss.xml",
-            category: .business,
-            sourcePriority: 0.95
+            id: "npr-news",
+            label: "NPR News",
+            feedURLString: "https://feeds.npr.org/1001/rss.xml",
+            category: .general,
+            storyLane: .national,
+            sourcePriority: 1.0
+        ),
+        ConfiguredNewsFeed(
+            id: "cbs-us",
+            label: "CBS News U.S.",
+            feedURLString: "https://www.cbsnews.com/latest/rss/us",
+            category: .general,
+            storyLane: .national,
+            sourcePriority: 1.0
+        ),
+        ConfiguredNewsFeed(
+            id: "wnyc-news",
+            label: "WNYC",
+            feedURLString: "https://feeds.wnyc.org/wnycnews/rss.xml",
+            category: .local,
+            storyLane: .regionalOverflow,
+            sourcePriority: 0.65,
+            isEnabled: false
+        ),
+        ConfiguredNewsFeed(
+            id: "mycentraljersey",
+            label: "MyCentralJersey",
+            feedURLString: "",
+            category: .local,
+            storyLane: .newJerseyLocal,
+            sourcePriority: 0.55,
+            isEnabled: false,
+            statusNote: "Ready Room could not confirm a clean official MyCentralJersey RSS feed URL, so this source is seeded but disabled."
         )
     ]
 
@@ -668,6 +770,24 @@ public struct NewsSettings: Codable, Sendable, Hashable {
     public var hasAnyEnabledFeed: Bool {
         feeds.contains(where: \.isEnabled)
     }
+
+    private static func migratingCuratedFeedsIfNeeded(from feeds: [ConfiguredNewsFeed]) -> (feeds: [ConfiguredNewsFeed], didMigrate: Bool) {
+        let existingCurated = feeds.filter { $0.isUserAdded == false }
+        let existingCuratedIDs = Set(existingCurated.map(\.id))
+        let legacyStarterIDs = Set([
+            "bbc-top-stories",
+            "guardian-world",
+            "guardian-us",
+            "bbc-business"
+        ])
+
+        guard existingCuratedIDs.isDisjoint(with: legacyStarterIDs) == false else {
+            return (feeds, false)
+        }
+
+        let manualFeeds = feeds.filter(\.isUserAdded)
+        return (starterFeeds + manualFeeds, true)
+    }
 }
 
 public struct LastGoodNewsSnapshot: Codable, Sendable, Hashable {
@@ -690,6 +810,7 @@ public struct NewsHeadline: Codable, Sendable, Hashable, Identifiable {
     public var weight: Double
     public var feedIdentifier: String?
     public var category: NewsCategory?
+    public var storyLane: NewsStoryLane?
     public var sourcePriority: Double
     public var rankingExplanation: String?
 
@@ -703,6 +824,7 @@ public struct NewsHeadline: Codable, Sendable, Hashable, Identifiable {
         weight: Double = 1.0,
         feedIdentifier: String? = nil,
         category: NewsCategory? = nil,
+        storyLane: NewsStoryLane? = nil,
         sourcePriority: Double = 1.0,
         rankingExplanation: String? = nil
     ) {
@@ -715,6 +837,7 @@ public struct NewsHeadline: Codable, Sendable, Hashable, Identifiable {
         self.weight = weight
         self.feedIdentifier = feedIdentifier
         self.category = category
+        self.storyLane = storyLane
         self.sourcePriority = sourcePriority
         self.rankingExplanation = rankingExplanation
     }

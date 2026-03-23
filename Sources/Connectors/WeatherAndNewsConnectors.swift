@@ -203,15 +203,20 @@ public actor OpenMeteoWeatherConnector: SourceConnector {
     }
 
     public func refresh() async throws -> SourceSnapshot {
-        let url = URL(string: "https://api.open-meteo.com/v1/forecast?latitude=\(configuration.latitude)&longitude=\(configuration.longitude)&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto")!
+        let url = URL(string: "https://api.open-meteo.com/v1/forecast?latitude=\(configuration.latitude)&longitude=\(configuration.longitude)&current=temperature_2m,weather_code,wind_speed_10m,precipitation_probability&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=3")!
         let (data, _) = try await session.data(from: url)
         let payload = try JSONDecoder().decode(OpenMeteoPayload.self, from: data)
+        let forecastPeriods = OpenMeteoForecastBuilder.forecastPeriods(from: payload, now: .now)
         let weather = WeatherSnapshot(
             summary: payload.current.summary,
             symbolName: payload.current.symbolName,
             currentTemperatureF: payload.current.temperature2M,
             highF: payload.daily.temperature2MMax.first ?? payload.current.temperature2M,
             lowF: payload.daily.temperature2MMin.first ?? payload.current.temperature2M
+            ,
+            precipitationChancePercent: payload.daily.precipitationProbabilityMax.first ?? payload.current.precipitationProbability,
+            windSpeedMPH: payload.current.windSpeed10M ?? payload.daily.windSpeed10MMax.first,
+            forecastPeriods: forecastPeriods
         )
         return SourceSnapshot(
             source: source,
@@ -225,12 +230,18 @@ public actor OpenMeteoWeatherConnector: SourceConnector {
 
 private struct OpenMeteoPayload: Decodable {
     struct Current: Decodable {
+        let time: String
         let temperature2M: Double
         let weatherCode: Int
+        let windSpeed10M: Double?
+        let precipitationProbability: Double?
 
         enum CodingKeys: String, CodingKey {
+            case time
             case temperature2M = "temperature_2m"
             case weatherCode = "weather_code"
+            case windSpeed10M = "wind_speed_10m"
+            case precipitationProbability = "precipitation_probability"
         }
 
         var summary: String {
@@ -243,17 +254,149 @@ private struct OpenMeteoPayload: Decodable {
     }
 
     struct Daily: Decodable {
+        let time: [String]
+        let weatherCode: [Int]
         let temperature2MMax: [Double]
         let temperature2MMin: [Double]
+        let precipitationProbabilityMax: [Double]
+        let windSpeed10MMax: [Double]
 
         enum CodingKeys: String, CodingKey {
+            case time
+            case weatherCode = "weather_code"
             case temperature2MMax = "temperature_2m_max"
             case temperature2MMin = "temperature_2m_min"
+            case precipitationProbabilityMax = "precipitation_probability_max"
+            case windSpeed10MMax = "wind_speed_10m_max"
+        }
+    }
+
+    struct Hourly: Decodable {
+        let time: [String]
+        let temperature2M: [Double]
+        let weatherCode: [Int]
+
+        enum CodingKeys: String, CodingKey {
+            case time
+            case temperature2M = "temperature_2m"
+            case weatherCode = "weather_code"
         }
     }
 
     let current: Current
+    let hourly: Hourly
     let daily: Daily
+}
+
+private enum OpenMeteoForecastBuilder {
+    private struct HourlySample {
+        let date: Date
+        let temperatureF: Double
+        let weatherCode: Int
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        return formatter
+    }()
+
+    static func forecastPeriods(from payload: OpenMeteoPayload, now: Date) -> [WeatherForecastPeriod] {
+        let calendar = Calendar.readyRoomGregorian
+        var periods: [WeatherForecastPeriod] = []
+
+        if let today = dailyPeriod(label: "Today", index: 0, payload: payload) {
+            periods.append(today)
+        }
+
+        if let tonight = tonightPeriod(from: payload, now: now, calendar: calendar) {
+            periods.append(tonight)
+        }
+
+        if let tomorrow = dailyPeriod(label: "Tomorrow", index: 1, payload: payload) {
+            periods.append(tomorrow)
+        }
+
+        return periods
+    }
+
+    private static func dailyPeriod(label: String, index: Int, payload: OpenMeteoPayload) -> WeatherForecastPeriod? {
+        guard payload.daily.temperature2MMax.indices.contains(index),
+              payload.daily.temperature2MMin.indices.contains(index),
+              payload.daily.weatherCode.indices.contains(index) else {
+            return nil
+        }
+
+        let weatherCode = payload.daily.weatherCode[index]
+        return WeatherForecastPeriod(
+            id: label.lowercased(),
+            label: label,
+            summary: OpenMeteoWeatherCodeMapper.summary(for: weatherCode),
+            symbolName: OpenMeteoWeatherCodeMapper.symbolName(for: weatherCode),
+            highF: payload.daily.temperature2MMax[index],
+            lowF: payload.daily.temperature2MMin[index]
+        )
+    }
+
+    private static func tonightPeriod(from payload: OpenMeteoPayload, now: Date, calendar: Calendar) -> WeatherForecastPeriod? {
+        let samples = zip(payload.hourly.time.indices, payload.hourly.time).compactMap { index, value -> HourlySample? in
+            guard payload.hourly.temperature2M.indices.contains(index),
+                  payload.hourly.weatherCode.indices.contains(index),
+                  let date = dateFormatter.date(from: value) else {
+                return nil
+            }
+
+            return HourlySample(
+                date: date,
+                temperatureF: payload.hourly.temperature2M[index],
+                weatherCode: payload.hourly.weatherCode[index]
+            )
+        }
+
+        guard samples.isEmpty == false else {
+            return nil
+        }
+
+        let currentHour = calendar.component(.hour, from: now)
+        let startOfToday = now.startOfDay(in: calendar)
+        let todayAtSixPM = calendar.date(byAdding: .hour, value: 18, to: startOfToday) ?? now
+        let tomorrowAtSixAM = calendar.date(byAdding: .hour, value: 30, to: startOfToday) ?? todayAtSixPM.addingTimeInterval(12 * 3600)
+        let tomorrowAtSixPM = calendar.date(byAdding: .hour, value: 42, to: startOfToday) ?? tomorrowAtSixAM.addingTimeInterval(12 * 3600)
+
+        let tonightStartBase: Date
+        let tonightEnd: Date
+        if currentHour >= 18 {
+            tonightStartBase = now
+            tonightEnd = tomorrowAtSixAM
+        } else if currentHour < 6 {
+            tonightStartBase = todayAtSixPM
+            tonightEnd = tomorrowAtSixAM
+        } else {
+            tonightStartBase = todayAtSixPM
+            tonightEnd = tomorrowAtSixAM
+        }
+        let tonightSamples = samples.filter { $0.date >= tonightStartBase && $0.date < tonightEnd }
+
+        let fallbackSamples = samples.filter { $0.date >= todayAtSixPM && $0.date < tomorrowAtSixPM }
+        let effectiveSamples = tonightSamples.isEmpty ? fallbackSamples : tonightSamples
+
+        guard let representative = effectiveSamples.first ?? samples.first else {
+            return nil
+        }
+
+        let temperatureRangeSamples = effectiveSamples.isEmpty ? [representative] : effectiveSamples
+        let highF = temperatureRangeSamples.map(\.temperatureF).max()
+        let lowF = temperatureRangeSamples.map(\.temperatureF).min()
+        return WeatherForecastPeriod(
+            id: "tonight",
+            label: "Tonight",
+            summary: OpenMeteoWeatherCodeMapper.summary(for: representative.weatherCode),
+            symbolName: OpenMeteoWeatherCodeMapper.symbolName(for: representative.weatherCode),
+            highF: highF,
+            lowF: lowF
+        )
+    }
 }
 
 public actor RSSNewsConnector: SourceConnector {
@@ -295,6 +438,7 @@ public actor RSSNewsConnector: SourceConnector {
                                 weight: headline.weight,
                                 feedIdentifier: feed.id,
                                 category: feed.category,
+                                storyLane: feed.storyLane,
                                 sourcePriority: feed.sourcePriority
                             )
                         }

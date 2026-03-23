@@ -856,6 +856,7 @@ private struct NewsSettingsView: View {
                                 label: "Local feed",
                                 feedURLString: "https://",
                                 category: .local,
+                                storyLane: .newJerseyLocal,
                                 sourcePriority: 1.0,
                                 isEnabled: true,
                                 isUserAdded: true
@@ -992,6 +993,11 @@ private struct NewsFeedEditorRow: View {
                         Text(category.displayName).tag(category)
                     }
                 }
+                Picker("Story Lane", selection: $feed.storyLane) {
+                    ForEach(NewsStoryLane.allCases, id: \.self) { lane in
+                        Text(lane.displayName).tag(lane)
+                    }
+                }
                 Toggle("Enabled", isOn: $feed.isEnabled)
             }
             HStack {
@@ -1000,6 +1006,11 @@ private struct NewsFeedEditorRow: View {
                 Slider(value: $feed.sourcePriority, in: 0.5...2.0, step: 0.05)
                 Text(String(format: "%.2f", feed.sourcePriority))
                     .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if let statusNote = feed.statusNote {
+                Text(statusNote)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
