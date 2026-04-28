@@ -1,6 +1,6 @@
 # Ready Room: Where We Stand
 
-Updated for version `0.2.11 (31)`
+Updated for version `0.2.15 (35)`
 
 ## Overall Status
 
@@ -69,6 +69,11 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - custom shared folder support works
 - each Mac can use a different absolute path to the same synced folder
 - storage/sync settings explain what is shared, local, created, and not yet created
+
+### CI / Release Packaging
+- GitHub Actions build workflow runs tests and creates a universal macOS DMG artifact on pushes to `main`
+- GitHub Actions release workflow publishes a GitHub Release when the checked-in `VERSION` file changes on `main`
+- release packaging validates checked-in version metadata, builds Apple Silicon and Intel slices, combines them into a universal app, ad-hoc signs it, and wraps it in a DMG
 
 ## Partially Implemented
 
@@ -140,10 +145,11 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 ### Operational Hardening
 - full real-world validation of multi-Mac duplicate-send protection
 - runtime launch-at-login / auto-start behavior
-- polished packaging/signing/distribution flow
+- Developer ID signing and notarization
 
 ## Known Limitations And Trust Warnings
 
+- Release DMGs are ad-hoc signed but not Developer ID signed or notarized, so macOS Gatekeeper may still require manual approval in System Settings.
 - Media may still be placeholder data unless explicitly wired to live sources.
 - Weather now has a live path, but it depends on Apple location resolution succeeding and Open-Meteo being reachable.
 - News now has a live path, but it depends on configured publisher feeds remaining reachable and parseable; when feeds fail, Ready Room falls back to the last good cached headlines and marks the source stale or unavailable instead of pretending sample news is current.
@@ -166,6 +172,7 @@ To get useful daily behavior right now:
 - Calendar permission must be granted for live EventKit calendars
 - if using cross-Mac sync, each Mac should point Ready Room at its own local path to the same synced folder
 - if using scheduled sends, real John and Amy recipient lists must be configured
+- if using a downloaded release DMG, Gatekeeper may require System Settings > Privacy & Security > Open Anyway because the app is not notarized
 
 ## Important Operational Risks
 
@@ -175,6 +182,7 @@ To get useful daily behavior right now:
 - Placeholder data can still leak into daily use for media because that connector is not fully configured yet.
 - Per-calendar defaults improve classification, but misclassified single events still need a future item-level correction flow.
 - People colors are configurable now, but per-calendar color overrides and richer calendar-rule management are still incomplete.
+- CI can publish version-triggered releases, but downloaded builds still lack Developer ID signing and notarization.
 
 ## Recommended Next Priorities
 
