@@ -132,13 +132,13 @@ public actor ReadyRoomStorageCoordinator {
     public func resolveRoots() throws -> StorageRoots {
         let localRoot = try resolveLocalRoot()
         if let sharedRootOverride {
-            try? fileManager.createDirectory(at: sharedRootOverride, withIntermediateDirectories: true)
+            try validateCustomSharedRoot(sharedRootOverride)
             return StorageRoots(localRoot: localRoot, sharedRoot: sharedRootOverride, sharedMode: .customFolder)
         }
         let preferences = try loadStoragePreferences()
 
         if let customSharedRoot = preferences.customSharedRoot?.standardizedFileURL {
-            try? fileManager.createDirectory(at: customSharedRoot, withIntermediateDirectories: true)
+            try validateCustomSharedRoot(customSharedRoot)
             return StorageRoots(localRoot: localRoot, sharedRoot: customSharedRoot, sharedMode: .customFolder)
         }
 
@@ -165,9 +165,36 @@ public actor ReadyRoomStorageCoordinator {
     }
 
     public func setCustomSharedRoot(_ url: URL?) throws {
+        if let url {
+            try validateCustomSharedRoot(url.standardizedFileURL)
+        }
         var preferences = try loadStoragePreferences()
         preferences.customSharedRootPath = url?.standardizedFileURL.path
         try saveStoragePreferences(preferences)
+    }
+
+    private func validateCustomSharedRoot(_ url: URL) throws {
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue else {
+                throw NSError(
+                    domain: "ReadyRoomStorage",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "The selected shared path is not a folder."]
+                )
+            }
+            return
+        }
+
+        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw NSError(
+                domain: "ReadyRoomStorage",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Ready Room could not create the selected shared folder."]
+            )
+        }
     }
 
     private func saveStoragePreferences(_ preferences: StoragePreferences) throws {

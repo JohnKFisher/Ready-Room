@@ -11,7 +11,9 @@ struct RootContentView: View {
                     Label(screen.title, systemImage: icon(for: screen))
                         .tag(screen)
                 }
+                .listStyle(.sidebar)
                 .frame(minWidth: 200)
+                .accessibilityLabel("Ready Room sections")
 
                 VStack(alignment: .leading, spacing: 4) {
                     Divider()
@@ -49,15 +51,19 @@ struct RootContentView: View {
                 Button("Refresh") {
                     Task { await model.refresh() }
                 }
+                .help("Refresh calendar, weather, news, media, and obligation sources")
                 Button("Dashboard") {
                     model.selectedScreen = .dashboard
                 }
+                .help("Show the Dashboard")
                 Button("Briefing") {
                     model.selectedScreen = .preview
                 }
+                .help("Show the briefing preview")
                 Button("Send Now") {
                     model.showSendChooser = true
                 }
+                .help("Send a briefing now")
             }
         }
         .confirmationDialog("Send briefing now", isPresented: $model.showSendChooser) {

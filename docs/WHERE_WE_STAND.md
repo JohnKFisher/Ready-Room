@@ -1,6 +1,6 @@
 # Ready Room: Where We Stand
 
-Updated for version `0.2.15 (35)`
+Updated for version `0.3.0 (37)`
 
 ## Overall Status
 
@@ -35,6 +35,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - placeholder data is clearly labeled in the dashboard and debug views when a source is still sample-backed
 - dashboard hero weather stays compact while the weather module now shows richer today metrics plus a short `Today`/`Tonight`/`Tomorrow` strip
 - dashboard news now shows featured live headlines from configured RSS/Atom feeds, with clickable article links that open in the default browser
+- Beacon Wall remains the intentional custom dashboard character; compliance work is not meant to flatten it into a generic Mac utility UI
 
 ### Obligations
 - YAML-backed obligations storage
@@ -67,6 +68,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 ### Storage / Multi-Mac
 - clear local-vs-shared storage boundary
 - custom shared folder support works
+- custom shared folder selection now rejects paths that cannot be used as directories
 - each Mac can use a different absolute path to the same synced folder
 - storage/sync settings explain what is shared, local, created, and not yet created
 
@@ -74,14 +76,17 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - GitHub Actions build workflow runs tests and creates a universal macOS DMG artifact on pushes to `main`
 - GitHub Actions release workflow publishes a GitHub Release when the checked-in `VERSION` file changes on `main`
 - release packaging validates checked-in version metadata, builds Apple Silicon and Intel slices, combines them into a universal app, ad-hoc signs it, and wraps it in a DMG
+- local development now has `script/build_and_run.sh`, which stages and opens a real `.app` bundle for app testing
 
 ## Partially Implemented
 
 ### Live Data Connectors
 - EventKit calendars are partly real and actively used
+- live EventKit access now requires an explicit enable action in Calendars settings instead of prompting during automatic startup/refresh
 - weather now has a real configuration screen and live data path
 - weather location resolves through Apple location search and current conditions plus short forecast data come from Open-Meteo
 - news now has a real shared configuration screen, a curated North Jersey / U.S. starter bundle, optional manual local feeds, and deterministic per-surface ranking for dashboard/John/Amy
+- enabled news feeds now require absolute `http` or `https` URLs with a host
 - news now refreshes on startup, manual refresh, scheduled-send prep, every 30 minutes for calendar/obligations, and every 60 minutes for news/weather while the app stays open
 - media is still mostly placeholder-driven in normal use
 - configuration UX for media is still mostly missing
@@ -96,6 +101,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - the sidebar structure exists
 - sender, storage/sync, weather, news, and calendars are meaningfully usable
 - calendar settings now expose per-calendar role, default owner, dashboard inclusion, default John/Amy relevance, and read-only preview rows for recent normalized events
+- in-app operational Settings are an intentional product choice for now; there is not a separate native macOS Settings scene yet
 - dashboard settings now include shared person-color customization with a live preview and reset-to-defaults control
 - sender settings now include SMTP server details, sender selection, and local Keychain-backed password status
 - most other settings pages are still placeholders or explanatory shells
@@ -104,6 +110,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - source health is visible
 - raw normalized payload inspection exists
 - ranked news weights and feed settings now show up in the debug payload
+- sparse unified logging now covers refresh, calendar permission, storage-folder selection, scheduled sends, and send fallback paths
 - but logs, source test buttons, resend tools, and richer debug workflows are not there yet
 
 ### Dashboard Mode / Operational Polish
@@ -117,7 +124,7 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 ### Setup
 - real first-run setup wizard
 - skip/resume onboarding flow
-- permission-guidance flow
+- broader permission-guidance flow beyond the explicit Calendars enable action
 
 ### Calendar Management UI
 - inactive-until-classified workflow
@@ -159,7 +166,8 @@ It is **not** yet in a state where you should fully trust unattended morning ema
 - Scheduled sending is improved, but still not fully proven as “trust it every morning without checking.”
 - Calendar defaults are now configurable, but correction is still per-calendar only; item-level fixes and keyword rules are not built yet.
 - Several settings pages are still scaffold/UI shell rather than finished product.
-- Notifications are not implemented, so the app will not proactively warn you about important changes yet.
+- Notifications are not implemented, so the app will not proactively warn you about important changes yet. Notification permission text is intentionally absent until that feature exists.
+- Live calendars must be enabled from Calendars settings before Ready Room asks macOS for Calendar access.
 - This is still an early build and should be treated as helpful-but-experimental.
 
 ## Setup / Runtime Requirements
@@ -169,7 +177,7 @@ To get useful daily behavior right now:
 - if you want HTML email, SMTP server details must be configured and an SMTP password must be stored locally in this Mac's Keychain
 - if you want Apple Mail fallback, Apple Mail must be configured and able to send mail
 - if you want Apple Mail fallback, Apple Events/Mail automation permission must be granted
-- Calendar permission must be granted for live EventKit calendars
+- Calendar access must be explicitly enabled in Calendars settings and granted in macOS for live EventKit calendars
 - if using cross-Mac sync, each Mac should point Ready Room at its own local path to the same synced folder
 - if using scheduled sends, real John and Amy recipient lists must be configured
 - if using a downloaded release DMG, Gatekeeper may require System Settings > Privacy & Security > Open Anyway because the app is not notarized
@@ -183,12 +191,13 @@ To get useful daily behavior right now:
 - Per-calendar defaults improve classification, but misclassified single events still need a future item-level correction flow.
 - People colors are configurable now, but per-calendar color overrides and richer calendar-rule management are still incomplete.
 - CI can publish version-triggered releases, but downloaded builds still lack Developer ID signing and notarization.
+- The Beacon Wall dashboard style and in-app operational Settings are intentional project choices; future compliance work should not replace them without a separate decision.
 
 ## Recommended Next Priorities
 
-1. Make live media actually usable with a real configuration screen and live connector path.
-2. Improve sender reliability and diagnostics so morning-send failures are obvious and recoverable.
-3. Build the real setup wizard and permissions guidance.
+1. Build the real setup wizard and broader permissions guidance around the explicit calendar-access path.
+2. Make live media actually usable with a real configuration screen and live connector path.
+3. Improve sender reliability and diagnostics so morning-send failures are obvious and recoverable.
 4. Add notifications and archive/history UI.
 5. Add item-level correction workflows and finish the remaining briefing/calendar management controls.
 

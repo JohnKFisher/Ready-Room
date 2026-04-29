@@ -1582,6 +1582,25 @@ struct ReadyRoomFoundationTests {
     }
 
     @Test
+    func customSharedRootRejectsFilePath() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fileURL = root.appendingPathComponent("not-a-folder.txt")
+        try "not a folder".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let coordinator = ReadyRoomStorageCoordinator(localRootOverride: root.appendingPathComponent("LocalRoot", isDirectory: true))
+
+        do {
+            try await coordinator.setCustomSharedRoot(fileURL)
+            Issue.record("Expected custom shared root validation to reject a file path.")
+        } catch {
+            #expect(error.localizedDescription.contains("not a folder"))
+        }
+    }
+
+    @Test
     func senderSettingsReturnAudienceSpecificRecipients() {
         let settings = SenderSettings(
             primary: PrimarySenderConfiguration(machineIdentifier: "mac-mini"),
@@ -1715,6 +1734,14 @@ struct ReadyRoomFoundationTests {
         #expect(loaded.feeds.first(where: { $0.id == "wwor-my9-new-jersey" })?.isEnabled == true)
         #expect(loaded.feeds.first(where: { $0.id == "nj-spotlight-news" })?.isEnabled == true)
         #expect(loaded.feeds.first(where: { $0.id == "wnyc-news" })?.storyLane == .regionalOverflow)
+    }
+
+    @Test
+    func configuredNewsFeedRequiresAbsoluteHTTPURLWithHost() {
+        #expect(ConfiguredNewsFeed(label: "Valid", feedURLString: "https://example.com/feed.xml", category: .general).resolvedURL != nil)
+        #expect(ConfiguredNewsFeed(label: "Relative", feedURLString: "/feed.xml", category: .general).resolvedURL == nil)
+        #expect(ConfiguredNewsFeed(label: "Missing Host", feedURLString: "https:///feed.xml", category: .general).resolvedURL == nil)
+        #expect(ConfiguredNewsFeed(label: "File", feedURLString: "file:///tmp/feed.xml", category: .general).resolvedURL == nil)
     }
 
     @Test

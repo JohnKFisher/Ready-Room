@@ -588,7 +588,8 @@ public struct ConfiguredNewsFeed: Codable, Sendable, Hashable, Identifiable {
     public var resolvedURL: URL? {
         guard let url = URL(string: trimmedFeedURLString),
               let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme) else {
+              ["http", "https"].contains(scheme),
+              url.host?.isEmpty == false else {
             return nil
         }
         return url
@@ -1175,6 +1176,8 @@ public struct QuietHoursSettings: Codable, Sendable, Hashable {
 }
 
 public struct SetupProgress: Codable, Sendable, Hashable {
+    public static let calendarsSection = "Calendars"
+
     public var completedSections: Set<String>
     public var skippedSections: Set<String>
 
@@ -1186,6 +1189,14 @@ public struct SetupProgress: Codable, Sendable, Hashable {
     public var isComplete: Bool {
         let required = Set(["Calendars", "Sender", "Dashboard"])
         return required.isSubset(of: completedSections)
+    }
+
+    public var calendarAccessWasRequested: Bool {
+        completedSections.contains(Self.calendarsSection) || skippedSections.contains(Self.calendarsSection)
+    }
+
+    public var liveCalendarAccessEnabled: Bool {
+        completedSections.contains(Self.calendarsSection)
     }
 }
 

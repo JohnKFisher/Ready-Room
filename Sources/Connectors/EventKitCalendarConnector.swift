@@ -12,12 +12,19 @@ public actor EventKitCalendarConnector: SourceConnector {
         self.horizonDays = horizonDays
     }
 
+    public static func authorizationStatus() -> EKAuthorizationStatus {
+        EKEventStore.authorizationStatus(for: .event)
+    }
+
+    public func requestAccess() async throws -> Bool {
+        try await requestAccessIfNeeded()
+    }
+
     public func refresh() async throws -> SourceSnapshot {
-        let granted = try await requestAccessIfNeeded()
-        guard granted else {
+        guard Self.authorizationStatus().readyRoomAllowsEventAccess else {
             return SourceSnapshot(
                 source: source,
-                health: SourceHealth(status: .unauthorized, message: "Calendar permission has not been granted."),
+                health: SourceHealth(status: Self.authorizationStatus().readyRoomSourceHealthStatus, message: Self.authorizationStatus().readyRoomStatusMessage),
                 calendarEvents: []
             )
         }
@@ -87,5 +94,48 @@ public actor EventKitCalendarConnector: SourceConnector {
         let startOfToday = referenceDate.startOfDay(in: calendar)
         let hour = calendar.component(.hour, from: referenceDate)
         return hour < 3 ? startOfToday.adding(days: -1, calendar: calendar) : startOfToday
+    }
+}
+
+private extension EKAuthorizationStatus {
+    var readyRoomAllowsEventAccess: Bool {
+        switch self {
+        case .authorized, .fullAccess:
+            return true
+        case .notDetermined, .restricted, .denied, .writeOnly:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    var readyRoomSourceHealthStatus: SourceHealthStatus {
+        switch self {
+        case .notDetermined:
+            return .unconfigured
+        case .restricted, .denied, .writeOnly:
+            return .unauthorized
+        case .authorized, .fullAccess:
+            return .healthy
+        @unknown default:
+            return .unavailable
+        }
+    }
+
+    var readyRoomStatusMessage: String {
+        switch self {
+        case .notDetermined:
+            return "Calendar access has not been enabled in Ready Room settings."
+        case .restricted:
+            return "Calendar access is restricted on this Mac."
+        case .denied:
+            return "Calendar permission has not been granted."
+        case .writeOnly:
+            return "Ready Room needs full calendar access to read events."
+        case .authorized, .fullAccess:
+            return "Calendar access is available."
+        @unknown default:
+            return "Calendar permission status is unknown."
+        }
     }
 }

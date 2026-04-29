@@ -279,6 +279,7 @@ final class ReadyRoomAppModel: ObservableObject {
     func setCustomSharedFolder(_ url: URL?) async {
         do {
             try await storageCoordinator.setCustomSharedRoot(url)
+            ReadyRoomLog.storage.info("Updated custom shared folder: \(url?.standardizedFileURL.path ?? "automatic", privacy: .private)")
             lastKnownObligationsModifiedAt = nil
             senderSettings = try await senderSettingsStore.load()
             primarySenderConfiguration = senderSettings.primary
@@ -286,8 +287,38 @@ final class ReadyRoomAppModel: ObservableObject {
             await refresh()
             statusMessage = url == nil ? "Using local fallback shared storage." : "Updated the shared folder for this Mac."
         } catch {
+            ReadyRoomLog.storage.error("Could not update custom shared folder: \(error.localizedDescription, privacy: .public)")
             storageStatusError = error.localizedDescription
             statusMessage = "Could not update shared folder: \(error.localizedDescription)"
+        }
+    }
+
+    func requestCalendarAccess() async {
+        calendarSettingsStatusMessage = "Requesting Calendar access..."
+        calendarSettingsError = nil
+        ReadyRoomLog.calendar.info("Requesting explicit Calendar access")
+
+        do {
+            let granted = try await EventKitCalendarConnector().requestAccess()
+            let finalStatus: String
+            if granted {
+                setupProgress.completedSections.insert(SetupProgress.calendarsSection)
+                setupProgress.skippedSections.remove(SetupProgress.calendarsSection)
+                finalStatus = "Calendar access is enabled. Live calendar events will be used on refresh."
+                ReadyRoomLog.calendar.info("Calendar access granted")
+            } else {
+                setupProgress.skippedSections.insert(SetupProgress.calendarsSection)
+                setupProgress.completedSections.remove(SetupProgress.calendarsSection)
+                finalStatus = "Calendar access was not granted. Ready Room will keep showing that calendars are unavailable."
+                ReadyRoomLog.calendar.info("Calendar access not granted")
+            }
+            try await setupStore.save(setupProgress)
+            await enqueueRefresh(.calendar)
+            calendarSettingsStatusMessage = finalStatus
+        } catch {
+            calendarSettingsError = error.localizedDescription
+            calendarSettingsStatusMessage = "Calendar access could not be requested."
+            ReadyRoomLog.calendar.error("Calendar access request failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -753,6 +784,7 @@ final class ReadyRoomAppModel: ObservableObject {
     }
 
     private func performRefresh(components: RefreshComponents) async {
+        ReadyRoomLog.refresh.info("Starting refresh: \(String(describing: components), privacy: .public)")
         statusMessage = statusMessage(for: components)
         await syncWeatherSettingsFromStore()
         await syncNewsSettingsFromStore()
@@ -773,6 +805,7 @@ final class ReadyRoomAppModel: ObservableObject {
         }
 
         statusMessage = refreshWarning ?? "Ready"
+        ReadyRoomLog.refresh.info("Finished refresh: \(String(describing: components), privacy: .public)")
     }
 
     private func collectSnapshots(refreshing components: RefreshComponents) async -> [SourceSnapshot] {
@@ -790,14 +823,21 @@ final class ReadyRoomAppModel: ObservableObject {
         }
 
         if components.contains(.calendar) || snapshot(for: .calendar) == nil {
-            let calendarConnector = EventKitCalendarConnector()
-            if let liveCalendar = try? await calendarConnector.refresh(),
-               liveCalendar.health.status != .unauthorized,
-               liveCalendar.calendarEvents.isEmpty == false {
-                replaceSnapshot(liveCalendar, in: &snapshots, type: .calendar)
-            } else if snapshots.contains(where: { $0.source.type == .calendar }) == false,
-                      let sampleCalendar = DevelopmentData.sampleSnapshots(referenceDate: now).first(where: { $0.source.type == .calendar }) {
-                snapshots.append(sampleCalendar)
+            if setupProgress.calendarAccessWasRequested {
+                let calendarConnector = EventKitCalendarConnector()
+                if let liveCalendar = try? await calendarConnector.refresh() {
+                    replaceSnapshot(liveCalendar, in: &snapshots, type: .calendar)
+                    ReadyRoomLog.calendar.info("Calendar refresh status: \(liveCalendar.health.status.rawValue, privacy: .public), events: \(liveCalendar.calendarEvents.count, privacy: .public)")
+                }
+            } else if let sampleCalendar = DevelopmentData.sampleCalendarSnapshot(
+                referenceDate: now,
+                health: SourceHealth(
+                    status: .unconfigured,
+                    message: "Enable Calendar access in Settings to use live calendar events.",
+                    freshnessBudget: 900
+                )
+            ) {
+                replaceSnapshot(sampleCalendar, in: &snapshots, type: .calendar)
             }
         }
 
@@ -1039,6 +1079,7 @@ final class ReadyRoomAppModel: ObservableObject {
             return
         }
 
+        ReadyRoomLog.send.info("Scheduled send is due for \(dueAudiences.map(\.rawValue).joined(separator: ","), privacy: .public)")
         statusMessage = "Preparing morning briefing send..."
         await refreshBriefingsForScheduledSend()
 
@@ -1053,8 +1094,10 @@ final class ReadyRoomAppModel: ObservableObject {
                 let result = try await performSend(artifact: artifact, mode: .scheduled)
                 try await recordSendResult(result)
                 statusMessage = successStatusMessage(for: result, audience: audience, action: "Scheduled send completed")
+                ReadyRoomLog.send.info("Scheduled send completed for \(audience.rawValue, privacy: .public)")
             } catch {
                 statusMessage = "Scheduled send failed for \(audience.displayName): \(error.localizedDescription)"
+                ReadyRoomLog.send.error("Scheduled send failed for \(audience.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -1132,6 +1175,7 @@ final class ReadyRoomAppModel: ObservableObject {
                 throw NSError(domain: "ReadyRoomSend", code: 4, userInfo: [NSLocalizedDescriptionKey: reason])
             }
 
+            ReadyRoomLog.send.info("Using Apple Mail fallback because SMTP is unavailable")
             return SendPlan(
                 requestedSenderID: SenderTransport.smtp.rawValue,
                 requestedSenderDisplayName: SenderTransport.smtp.displayName,
@@ -1219,6 +1263,14 @@ private struct SendPlan {
 }
 
 private enum DevelopmentData {
+    static func sampleCalendarSnapshot(referenceDate: Date, health: SourceHealth? = nil) -> SourceSnapshot? {
+        var snapshot = sampleSnapshots(referenceDate: referenceDate).first(where: { $0.source.type == .calendar })
+        if let health {
+            snapshot?.health = health
+        }
+        return snapshot
+    }
+
     static func sampleSnapshots(referenceDate: Date) -> [SourceSnapshot] {
         let calendar = Calendar.readyRoomGregorian
         let startOfDay = referenceDate.startOfDay(in: calendar)
